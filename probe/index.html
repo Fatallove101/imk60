@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>iMK60 探针 · 只读采集</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --line:#e6e8ec; --text:#1b1d21;
+    --muted:#6b7280; --accent:#2563eb; --ok:#0f9d58; --warn:#b45309; --err:#dc2626;
+    --mono:ui-monospace,"Cascadia Mono",Consolas,"Courier New",monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:15px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
+  .wrap{max-width:880px;margin:0 auto;padding:40px 20px 80px}
+  h1{font-size:24px;margin:0 0 6px;letter-spacing:.2px}
+  .sub{color:var(--muted);font-size:14px;margin-bottom:26px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;
+        padding:22px;margin-bottom:18px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  button{border:1px solid var(--line);background:#fff;color:var(--text);font-size:14px;
+         padding:10px 16px;border-radius:10px;cursor:pointer;transition:.15s}
+  button:hover{background:#f3f5f9}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
+  button.primary:hover{filter:brightness(1.05)}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .pill{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--muted);
+        border:1px solid var(--line);border-radius:999px;padding:5px 12px;background:#fff}
+  .dot{width:8px;height:8px;border-radius:50%;background:#c9ced6}
+  .dot.on{background:var(--ok);box-shadow:0 0 0 3px rgba(15,157,88,.14)}
+  .dot.busy{background:var(--warn);animation:pulse 1s infinite}
+  @keyframes pulse{50%{opacity:.35}}
+  ol.steps{margin:0;padding-left:20px;color:var(--muted);font-size:14px}
+  ol.steps b{color:var(--text)}
+  #log{background:#0f1216;color:#c8d1dc;font:12.5px/1.7 var(--mono);border-radius:10px;
+       padding:14px;height:220px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin-top:14px}
+  #log .ok{color:#6ee7a8} #log .er{color:#fca5a5} #log .hi{color:#93c5fd}
+  table{width:100%;border-collapse:collapse;font-size:13.5px}
+  td{padding:7px 10px;border-bottom:1px solid var(--line)}
+  td:first-child{color:var(--muted);width:190px}
+  code{font-family:var(--mono);font-size:12.5px;background:#f1f3f7;padding:1px 6px;border-radius:5px}
+  .note{font-size:13px;color:var(--muted)}
+  .kbd{border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;
+       font-family:var(--mono);font-size:12px;background:#fff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>iMK60 探针</h1>
+  <div class="sub">只读采集键盘参数（不写入任何设置）· 采集完自动存到本地</div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <span class="pill"><span class="dot" id="dot"></span><span id="status">未连接</span></span>
+      <span class="note">当前页面地址必须是 <code>127.0.0.1</code></span>
+    </div>
+
+    <div class="row" style="margin-top:18px">
+      <button class="primary" id="btnConnect">① 连接键盘</button>
+      <button id="btnAll">找不到？列出全部 HID 设备</button>
+      <button id="btnSave" disabled>重新保存结果</button>
+    </div>
+
+    <ol class="steps" style="margin-top:18px">
+      <li>点「连接键盘」→ 弹窗里选中 <b>键盘的 raw HID 接口</b>（通常名字里带 <b>iMK / Vial / Matrix</b>）</li>
+      <li>点「连接」授权，页面自动跑完（约 2 秒，别动键盘）</li>
+      <li>看到 <b>绿色「已保存」</b> 就好了，回来告诉我一声</li>
+    </ol>
+
+    <div id="log"></div>
+    <div class="row" style="margin-top:12px">
+      <span class="note" id="saveState"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <table id="info">
+      <tr><td>设备</td><td id="i-name">—</td></tr>
+      <tr><td>VID / PID</td><td id="i-vidpid">—</td></tr>
+      <tr><td>VIA 协议</td><td id="i-via">—</td></tr>
+      <tr><td>Vial 协议</td><td id="i-vial">—</td></tr>
+      <tr><td>键盘 UID</td><td id="i-uid">—</td></tr>
+      <tr><td>定义大小</td><td id="i-defsize">—</td></tr>
+      <tr><td>Per-key RGB</td><td id="i-rgb">—</td></tr>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="note">
+      说明：这一步只发送「读」类命令。若中途报错，把日志截图发我即可，不影响键盘。
+      采集结果会写到 <code>probe\device_dump.json</code>。
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const logEl = $("log");
+function log(msg, cls) {
+  const t = new Date().toLocaleTimeString("zh-CN", {hour12:false});
+  const line = document.createElement("div");
+  if (cls) line.className = cls;
+  line.textContent = `[${t}] ${msg}`;
+  logEl.appendChild(line);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function setStatus(text, state) {
+  $("status").textContent = text;
+  const dot = $("dot");
+  dot.className = "dot" + (state ? " " + state : "");
+}
+const hex = (arr) => Array.from(arr).map(b => b.toString(16).padStart(2,"0")).join(" ");
+const hexList = (arr) => Array.from(arr).map(b => "0x" + b.toString(16).padStart(2,"0"));
+
+/* ---------- WebHID 传输层：一次只发一条命令，等下一条 input report ---------- */
+let device = null;
+let chain = Promise.resolve();
+
+function xfer(bytes, timeoutMs = 900) {
+  const run = chain.then(() => doXfer(bytes, timeoutMs));
+  chain = run.catch(() => {});
+  return run;
+}
+
+async function doXfer(bytes, timeoutMs) {
+  if (!device || !device.opened) throw new Error("设备未打开");
+  const buf = new Uint8Array(32);
+  buf.set(bytes.slice(0, 32));
+
+  const wait = new Promise((resolve, reject) => {
+    const onReport = (e) => {
+      cleanup();
+      resolve(new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("无响应（命令 " + hex(bytes.slice(0,4)) + "）"));
+    }, timeoutMs);
+    function cleanup() {
+      clearTimeout(timer);
+      device.removeEventListener("inputreport", onReport);
+    }
+    device.addEventListener("inputreport", onReport);
+  });
+
+  wait.catch(() => {});   // 发送失败时避免未处理的 rejection
+  try {
+    await device.sendReport(0, buf);
+  } catch (err) {
+    throw new Error("发送失败：" + (err && err.message ? err.message : err));
+  }
+  const resp = await wait;
+  await new Promise(r => setTimeout(r, 12));  // 让链路缓一下
+  return resp;
+}
+
+/* ---------- 采集 ---------- */
+const dump = {};
+const t0 = performance.now();
+
+async function connect(acceptAll) {
+  if (!("hid" in navigator)) {
+    alert("这个浏览器不支持 WebHID，请用 Chrome 或 Edge 打开。");
+    return;
+  }
+  $("btnConnect").disabled = true;
+  $("btnAll").disabled = true;
+  setStatus("等待选择设备…", "busy");
+  log("打开设备选择器" + (acceptAll ? "（全部设备）" : "（raw HID 0xFF60/0x61）"));
+
+  let picked = [];
+  try {
+    const opts = acceptAll ? { acceptAllDevices: true } : { filters: [{ usagePage: 0xFF60, usage: 0x61 }] };
+    picked = await navigator.hid.requestDevice(opts);
+  } catch (err) {
+    log("选择器报错：" + err.message, "er");
+  }
+  if (!picked || picked.length === 0) {
+    log("没有选中设备。若列表里看不到键盘，点「列出全部 HID 设备」再试。", "er");
+    setStatus("未连接", "");
+    $("btnConnect").disabled = false;
+    $("btnAll").disabled = false;
+    return;
+  }
+
+  device = picked[0];
+  try {
+    await device.open();
+  } catch (err) {
+    log("打开失败：" + err.message + "（别的软件可能占用着，先关掉官网页面再试）", "er");
+    setStatus("打开失败", "");
+    $("btnConnect").disabled = false;
+    $("btnAll").disabled = false;
+    return;
+  }
+
+  const cols = (device.collections || []).map(c => `${c.usagePage.toString(16)}/${c.usage.toString(16)}`);
+  log(`已打开：${device.productName}  VID=${device.vendorId.toString(16)} PID=${device.productId.toString(16)}`, "ok");
+  log("collections: " + (cols.join(", ") || "无"));
+  setStatus("已连接，采集中…", "busy");
+
+  dump.capturedAt = new Date().toISOString();
+  dump.transport = "webhid/localhost-probe";
+  dump.device = {
+    productName: device.productName,
+    vendorId: device.vendorId,
+    productId: device.productId,
+    collections: (device.collections || []).map(c => ({ usagePage: c.usagePage, usage: c.usage })),
+  };
+  dump.elapsedMsBeforeCapture = Math.round(performance.now() - t0);
+
+  try {
+    await capture();
+  } catch (err) {
+    log("采集中断：" + err.message, "er");
+  }
+
+  dump.log = Array.from(logEl.querySelectorAll("div")).map(d => d.textContent);
+
+  if (dump.vial && dump.vial.definitionBase64) {
+    setStatus("采集完成，正在保存…", "busy");
+    await save();
+  } else {
+    setStatus("采集不完整", "");
+    log("没拿到键盘定义，可能是固件不是标准 Vial。把日志发我。", "er");
+    $("btnSave").disabled = false;
+  }
+
+  $("btnConnect").disabled = false;
+  $("btnAll").disabled = false;
+}
+
+async function capture() {
+  /* 1) VIA 协议版本 */
+  let r = await xfer([0x01]);
+  dump.via = { protocolVersionRaw: hexList(r.slice(0, 4)), protocolVersionBE: (r[0] << 8) | r[1], protocolVersionLE: r[0] | (r[1] << 8) };
+  $("i-via").textContent = `raw ${hex(r.slice(0,4))}  (BE=${dump.via.protocolVersionBE})`;
+  log("VIA 协议版本 raw=" + hex(r.slice(0,4)), "ok");
+
+  /* 2) 层数 */
+  try {
+    r = await xfer([0x11]);
+    dump.via.layerCountRaw = hexList(r.slice(0, 4));
+    log("层数 raw=" + hex(r.slice(0,4)));
+  } catch (e) { log("层数读取失败：" + e.message, "er"); }
+
+  /* 3) 固件版本 / layout options */
+  for (const [name, id] of [["firmwareVersion", 0x04], ["layoutOptions", 0x02], ["uptime", 0x01]]) {
+    try {
+      r = await xfer([0x02, id]);
+      dump.via[name + "Raw"] = hexList(r.slice(0, 8));
+      log(`keyboard value 0x${id.toString(16)} raw=` + hex(r.slice(0,8)));
+    } catch (e) { log(`keyboard value 0x${id.toString(16)} 失败`, "er"); }
+  }
+
+  /* 4) 矩阵原始状态（用于推断行列） */
+  try {
+    r = await xfer([0x02, 0x03]);
+    dump.via.matrixStateRaw = Array.from(r);
+    log("矩阵状态 raw=" + hex(r), "hi");
+  } catch (e) { log("矩阵状态失败", "er"); }
+
+  /* 4.5) 动态键位缓冲（验证读键位通道） */
+  dump.via.keymapRaw = {};
+  for (const off of [0, 28, 56, 84]) {
+    try {
+      const resp = await xfer([0x12, (off >> 8) & 0xFF, off & 0xFF, 28], 700);
+      dump.via.keymapRaw["off" + off] = hexList(resp);
+    } catch (e) {
+      dump.via.keymapRaw["off" + off] = "timeout";
+    }
+  }
+  log("键位缓冲 off0 = " + String(dump.via.keymapRaw.off0).slice(0, 96), "hi");
+
+  /* 5) Vial：键盘 ID + 定义 */
+  r = await xfer([0xFE, 0x00]);
+  const vialProto = r[0] | (r[1] << 8) | (r[2] << 16) | (r[3] << 24);
+  const uid = Array.from(r.slice(4, 12));
+  dump.vial = {
+    protocolVersion: vialProto,
+    keyboardUid: uid,
+    keyboardUidHex: uid.map(b => b.toString(16).padStart(2,"0")).join(""),
+    rgbFlagByte12: r[12],
+    idResponseRaw: hexList(r),
+  };
+  $("i-vial").textContent = vialProto;
+  $("i-uid").textContent = dump.vial.keyboardUidHex;
+  $("i-rgb").textContent = r[12] === 1 ? "支持（vialrgb）" : "非 vialrgb，走 VIA 灯控";
+  log("Vial 协议=" + vialProto + "  UID=" + dump.vial.keyboardUidHex + "  rgbFlag=" + r[12], "ok");
+
+  r = await xfer([0xFE, 0x01]);
+  const size = r[0] | (r[1] << 8) | (r[2] << 16) | (r[3] << 24);
+  dump.vial.definitionSize = size;
+  $("i-defsize").textContent = size + " bytes";
+  log("定义大小 = " + size + " bytes", "ok");
+
+  if (!size || size > 200000) throw new Error("定义大小异常：" + size);
+
+  const pages = Math.ceil(size / 32);
+  const bytes = new Uint8Array(size);
+  let got = 0;
+  for (let page = 0; page < pages; page++) {
+    const resp = await xfer([0xFE, 0x02, page & 0xFF, (page >> 8) & 0xFF], 1200);
+    const take = Math.min(32, size - page * 32);
+    bytes.set(resp.slice(0, take), page * 32);
+    got += take;
+    if (page % 8 === 0) log(`读取定义 ${got}/${size} bytes…`);
+  }
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  dump.vial.definitionBase64 = btoa(bin);
+  dump.vial.definitionHead = Array.from(bytes.slice(0, 64));
+  log("定义读取完成（" + bytes.length + " bytes）", "ok");
+
+  const headText = new TextDecoder("utf-8", {fatal:false}).decode(bytes.slice(0, 24));
+  log("定义开头文本片段：" + JSON.stringify(headText), "hi");
+
+  /* 6) 灯效能力（只读） */
+  dump.lighting = {};
+  const tries = [
+    ["rgbMatrix", 3, [1, 2, 3, 4]],
+    ["rgblight", 2, [0x80, 0x81, 0x82, 0x83]],
+  ];
+  for (const [label, channel, values] of tries) {
+    dump.lighting[label] = {};
+    for (const v of values) {
+      try {
+        const resp = await xfer([0x08, channel, v], 600);
+        dump.lighting[label]["0x" + v.toString(16).padStart(2, "0")] = hexList(resp.slice(0, 6));
+      } catch (e) {
+        dump.lighting[label]["0x" + v.toString(16).padStart(2, "0")] = "timeout";
+      }
+    }
+    log(`灯效 ${label}：` + JSON.stringify(dump.lighting[label]));
+  }
+}
+
+async function save() {
+  try {
+    const res = await fetch("/dump", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(dump, null, 1),
+    });
+    const js = await res.json();
+    if (!res.ok || !js.ok) throw new Error("服务返回 " + res.status);
+    $("saveState").textContent = "已保存 → " + js.saved;
+    log("已保存到 " + js.saved, "ok");
+    setStatus("已保存 ✓ 可以关掉页面了", "on");
+    $("btnSave").disabled = false;
+  } catch (err) {
+    log("保存失败：" + err.message + "（检查探针服务窗口是否还在）", "er");
+    setStatus("采集完成但保存失败", "");
+    $("btnSave").disabled = false;
+  }
+}
+
+// 设备信息填表
+const origConnect = connect;
+async function connectAndFill(all) {
+  await origConnect(all);
+  if (dump.device) {
+    $("i-name").textContent = dump.device.productName || "（无名称）";
+    $("i-vidpid").textContent = `${dump.device.vendorId.toString(16).padStart(4,"0")}:${dump.device.productId.toString(16).padStart(4,"0")}`;
+  }
+}
+$("btnConnect").onclick = () => connectAndFill(false);
+$("btnAll").onclick = () => connectAndFill(true);
+$("btnSave").onclick = save;
+
+log("就绪。请点「① 连接键盘」。");
+</script>
+</body>
+</html>

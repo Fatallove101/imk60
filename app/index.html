@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>imk60 · 女战士驱动</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<div class="home" id="home">
+  <div class="homeTop">
+    <div class="brand2">
+      <div class="logo">iMK</div>
+      <div>
+        <div class="bname">imk60</div>
+        <div class="bsub">女战士驱动</div>
+      </div>
+    </div>
+    <div class="homeTools">
+      <button class="pillbtn" id="homeHelp">使用说明</button>
+      <button class="pillbtn" id="homeDiag2">诊断日志</button>
+    </div>
+  </div>
+
+  <div class="homeBody">
+    <div class="devCard" id="devCard">
+      <div class="devTop">
+        <span class="devName">imk60</span>
+        <span class="devTag" id="devTag">立即连接</span>
+      </div>
+      <div class="devIcon"><img class="devImg" src="product.jpg" alt="imk60"></div>
+      <div class="devMeta">61 键 · Vial 固件 · VID 1027</div>
+    </div>
+
+    <div class="devCard add" id="addCard">
+      <div class="addPlus">＋</div>
+      <div class="addText">添加设备</div>
+    </div>
+  </div>
+
+  <div class="homeFoot">
+    提示：请用 Chrome / Edge 打开（需要 WebHID）。连接后自动备份全部层，改坏可随时恢复。
+  </div>
+</div>
+
+<div class="shell" hidden>
+  <!-- ================= 左侧导航 ================= -->
+  <aside class="side">
+    <div class="brand">
+      <div class="logo">iMK</div>
+      <div>
+        <div class="bname">imk60</div>
+        <div class="bsub">女战士驱动</div>
+      </div>
+    </div>
+
+    <div class="devcard">
+      <div class="devrow"><span class="dot" id="connDot"></span><span id="connText">未连接</span></div>
+      <div class="devsub">VID 1027 · PID 0727</div>
+    </div>
+
+    <div class="navgroup">
+      <div class="navtitle">键盘设置</div>
+      <button class="nav active" data-view="keymap">
+        <svg viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="3"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg>
+        <span>改键</span>
+      </button>
+      <button class="nav" data-view="advanced">
+        <svg viewBox="0 0 24 24"><path d="M12 3l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L4.8 8.3l5-.7L12 3z"/></svg>
+        <span>高级键</span>
+      </button>
+      <button class="nav" data-view="light">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
+        <span>灯光设置</span>
+      </button>
+      <button class="nav" data-view="buzzer">
+        <svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9a4 4 0 010 6M20 6.5a8 8 0 010 11"/></svg>
+        <span>蜂鸣器</span>
+      </button>
+      <button class="nav" data-view="test">
+        <svg viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></svg>
+        <span>按键测试</span>
+      </button>
+      <button class="nav" data-view="backup">
+        <svg viewBox="0 0 24 24"><path d="M4 8v11a1 1 0 001 1h14a1 1 0 001-1V8"/><rect x="2" y="4" width="20" height="4" rx="1"/><path d="M9 12h6"/></svg>
+        <span>备份恢复</span>
+      </button>
+    </div>
+
+    <div class="sidefoot">
+      <button id="btnConnect" class="cta">连接键盘</button>
+      <button id="btnDiag" class="ghostbtn">诊断日志</button>
+      <button id="btnHome" class="ghostbtn">返回主页</button>
+    </div>
+  </aside>
+
+  <!-- ================= 主区 ================= -->
+  <main class="main">
+    <section class="card canvasCard">
+      <div class="rail" id="layerRail"></div>
+      <div class="canvasWrap">
+        <div class="board" id="board"></div>
+        <div class="decoStrip" id="decoStrip" hidden></div>
+      </div>
+    </section>
+
+    <div class="hint" id="hint">点键盘上的键，在下方选择新键码</div>
+
+    <section class="card panelCard">
+      <!-- 改键 -->
+      <div class="view" id="viewKeymap">
+        <div class="paneltop">
+          <div class="selchip" id="selChip"><span class="muted">未选中按键</span></div>
+          <div class="tabs" id="tabs"></div>
+        </div>
+        <div class="picker" id="picker"></div>
+      </div>
+
+      <!-- 高级键 -->
+      <div class="view" id="viewAdvanced" hidden>
+        <div class="advTabs" id="advTabs">
+          <button class="ltab active" data-kind="td">Tap Dance</button>
+          <button class="ltab" data-kind="combo">组合键</button>
+          <button class="ltab" data-kind="ko">键改写</button>
+          <button class="ltab" data-kind="arep">重复键</button>
+        </div>
+        <div class="advHint" id="advHint">—</div>
+        <div class="advTable" id="advTable"></div>
+      </div>
+
+      <!-- 灯光 -->
+      <div class="view" id="viewLight" hidden>
+        <div class="lightTabs" id="lightTabs">
+          <button class="ltab active" data-tab="keys">主键盘</button>
+          <button class="ltab" data-tab="deco">底灯</button>
+        </div>
+        <div class="lightGrid" id="lightGrid">
+          <div class="lcol">
+            <div class="ltitle">自定义颜色</div>
+            <div class="wheel" id="wheel">
+              <div class="wlight"></div>
+              <div class="wcursor" id="wCursor"></div>
+            </div>
+            <input type="range" id="valbar" class="valbar" min="0" max="255" value="255">
+            <div class="rgbrow"><span>RGB</span><input id="rgbR" readonly><input id="rgbG" readonly><input id="rgbB" readonly></div>
+            <div class="rgbrow"><span>HEX</span><input id="hexIn" class="wide"></div>
+            <button id="btnClearLed" class="softbtn">清除逐键颜色</button>
+          </div>
+
+          <div class="lcol wide">
+            <div class="ltitle">灯效模式</div>
+            <div class="effectGrid" id="effects"></div>
+          </div>
+
+          <div class="lcol">
+            <div class="ltitle">参数</div>
+            <div class="param"><label>亮度 <b id="lbBright">0</b></label><input type="range" id="bright" min="0" max="255" value="0"></div>
+            <div class="param"><label>速度 <b id="lbSpeed">0</b></label><input type="range" id="speed" min="0" max="255" value="0"></div>
+            <div class="ltitle2">常用颜色</div>
+            <div class="swatches" id="swatches"></div>
+            <div class="ledinfo" id="ledInfo">连接后可逐键上色</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 蜂鸣器 -->
+      <div class="view" id="viewBuzzer" hidden>
+        <div class="buzzHead">
+          <div class="ltitle">蜂鸣器</div>
+          <div class="muted">开关与按键音直接读写固件音频通道；音效由固件内部循环切换，协议未开放。</div>
+        </div>
+
+        <div class="buzzGrid">
+          <div class="buzzCard">
+            <div class="buzzRow">
+              <div>
+                <div class="buzzName">蜂鸣器总开关</div>
+                <div class="buzzDesc">关闭后所有提示音、按键音都静音</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="swAudio"><span></span></label>
+            </div>
+            <div class="buzzRow">
+              <div>
+                <div class="buzzName">按键音 Click</div>
+                <div class="buzzDesc">每按一下键发出短促声音</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="swClicky"><span></span></label>
+            </div>
+            <div class="buzzRaw" id="buzzRaw">—</div>
+          </div>
+
+          <div class="buzzCard soft">
+            <div class="buzzName">音效（多种变声）</div>
+            <div class="buzzDesc" id="buzzVoice">
+              QMK 的音效编号是固件内部变量，VIA / Vial 协议没有「选择第 N 种音效」的命令。
+              厂家是在固件里用 <b>FN + [</b> 循环切换的。
+            </div>
+            <div class="buzzTip">
+              想换音效？用左边的「改键」把「切换音效」绑到一个顺手的位置，按一下换一种。
+            </div>
+          </div>
+        </div>
+
+        <div class="buzzState" id="buzzState">未连接</div>
+      </div>
+
+      <!-- 按键测试 -->
+      <div class="view" id="viewTest" hidden>
+        <div class="testHead">
+          <div>
+            <div class="ltitle">按键测试</div>
+            <div class="muted">按下键盘上的键：上方对应位置高亮，右侧实时显示系统收到的事件。只读，不会改任何设置。</div>
+          </div>
+        </div>
+        <div class="rawline" id="rawLine">矩阵原始：—</div>
+        <div class="testWrap">
+          <div class="testGrid" id="testGrid"></div>
+          <div class="eventBox">
+            <div class="evtitle">事件 <span class="muted" id="evHint">按任意键…</span></div>
+            <div class="eventLog" id="eventLog"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 备份 -->
+      <div class="view" id="viewBackup" hidden>
+        <div class="ltitle">备份与恢复</div>
+        <div class="muted" style="margin-bottom:16px">连接键盘时会自动备份全部层。备份同时存到浏览器本地和 <code>app\backups\</code> 目录。</div>
+        <div class="btnrow">
+          <button id="btnBackup" class="softbtn">立即备份</button>
+          <button id="btnRestore" class="softbtn danger">恢复最近备份</button>
+        </div>
+        <div class="backupInfo" id="backupInfo">—</div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<footer class="diagbar" id="diagBar" hidden>
+  <div class="diaghead"><span>诊断日志</span><button class="ghostbtn small" id="btnDiagClose">收起</button></div>
+  <pre id="diagLog"></pre>
+</footer>
+
+<div class="modal" id="kcModal" hidden>
+  <div class="modalBox">
+    <div class="modalHead">
+      <span id="kcModalTitle">选择键码</span>
+      <button class="ghostbtn small" id="kcModalClose">关闭</button>
+    </div>
+    <input class="modalSearch" id="kcSearch" placeholder="搜索键码：字母 / 音量 / 0x29 …" autocomplete="off">
+    <div class="modalCats" id="kcCats"></div>
+    <div class="modalGrid" id="kcGrid"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="keycodes.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
