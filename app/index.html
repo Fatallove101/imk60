@@ -120,7 +120,7 @@
       <!-- 高级键 -->
       <div class="view" id="viewAdvanced" hidden>
         <div class="advTabs" id="advTabs">
-          <button class="ltab active" data-kind="td">Tap Dance</button>
+          <button class="ltab active" data-kind="key">按键行为</button>
           <button class="ltab" data-kind="combo">组合键</button>
           <button class="ltab" data-kind="ko">键改写</button>
           <button class="ltab" data-kind="arep">重复键</button>
@@ -168,37 +168,29 @@
       <div class="view" id="viewBuzzer" hidden>
         <div class="buzzHead">
           <div class="ltitle">蜂鸣器</div>
-          <div class="muted">开关与按键音直接读写固件音频通道；音效由固件内部循环切换，协议未开放。</div>
+          <div class="muted">这块板子的 QMK 音频接口是空壳（写进去读回来还是 0），所以改用「键码」控制。</div>
         </div>
 
         <div class="buzzGrid">
           <div class="buzzCard">
-            <div class="buzzRow">
-              <div>
-                <div class="buzzName">蜂鸣器总开关</div>
-                <div class="buzzDesc">关闭后所有提示音、按键音都静音</div>
-              </div>
-              <label class="switch"><input type="checkbox" id="swAudio"><span></span></label>
-            </div>
-            <div class="buzzRow">
-              <div>
-                <div class="buzzName">按键音 Click</div>
-                <div class="buzzDesc">每按一下键发出短促声音</div>
-              </div>
-              <label class="switch"><input type="checkbox" id="swClicky"><span></span></label>
-            </div>
+            <div class="buzzName">固件音频通道（不可用）</div>
+            <div class="buzzDesc">固件接受写入但不保存，<b>enable / clicky</b> 始终为 0，开关点了会弹回。</div>
             <div class="buzzRaw" id="buzzRaw">—</div>
+            <div class="buzzRow" style="margin-top:14px">
+              <div><div class="buzzName">总开关</div><div class="buzzDesc">固件未接此字段</div></div>
+              <label class="switch"><input type="checkbox" id="swAudio" disabled><span></span></label>
+            </div>
+            <div class="buzzRow">
+              <div><div class="buzzName">按键音 Click</div><div class="buzzDesc">固件未接此字段</div></div>
+              <label class="switch"><input type="checkbox" id="swClicky" disabled><span></span></label>
+            </div>
           </div>
 
           <div class="buzzCard soft">
-            <div class="buzzName">音效（多种变声）</div>
-            <div class="buzzDesc" id="buzzVoice">
-              QMK 的音效编号是固件内部变量，VIA / Vial 协议没有「选择第 N 种音效」的命令。
-              厂家是在固件里用 <b>FN + [</b> 循环切换的。
-            </div>
-            <div class="buzzTip">
-              想换音效？用左边的「改键」把「切换音效」绑到一个顺手的位置，按一下换一种。
-            </div>
+            <div class="buzzName">用键码控制（推荐）</div>
+            <div class="buzzDesc">从 Fn 层自动读到的厂家键码，绑到任意键上即可使用：</div>
+            <div class="buzzCodes" id="buzzCodes">连接键盘后自动读取…</div>
+            <button class="softbtn" id="btnGoKeymap">去「改键」绑定</button>
           </div>
         </div>
 

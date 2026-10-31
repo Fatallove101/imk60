@@ -181,6 +181,7 @@
       if (code === 0x0001) el.classList.add("transparent");
       else if (isMod(code)) el.classList.add("mod");
       if (S.sel && S.sel.r === k.r && S.sel.c === k.c && S.view === "keymap") el.classList.add("sel");
+      if (S.advKey && S.advKey.r === k.r && S.advKey.c === k.c && S.view === "advanced") el.classList.add("sel");
 
       const led = document.createElement("div");
       led.className = "led";
@@ -221,6 +222,12 @@
 
   function onKeyClick(k) {
     if (S.view === "light") return paintKey(k);
+    if (S.view === "advanced") {
+      S.advKey = { r: k.r, c: k.c };
+      renderBoard();
+      renderAdvKey();
+      return;
+    }
     if (S.view !== "keymap") return;
     S.sel = { r: k.r, c: k.c };
     renderBoard(); renderSelChip(); renderPicker();
@@ -268,7 +275,7 @@
   }
 
   /* ================= 键码面板 ================= */
-  const CATS = ["基础", "修饰", "层", "高级", "功能", "多媒体", "符号", "鼠标", "自定义"];
+  const CATS = ["基础", "修饰", "层", "高级", "功能", "多媒体", "符号", "鼠标", "蜂鸣器", "自定义"];
   let curCat = "基础";
 
   const ROWS = [
@@ -321,7 +328,7 @@
       return;
     }
 
-    const map = { "修饰": "修饰", "层": "层", "高级": "高级", "功能": "功能键", "多媒体": "媒体", "符号": "符号", "鼠标": "鼠标", "自定义": "自定义" };
+    const map = { "修饰": "修饰", "层": "层", "高级": "高级", "功能": "功能键", "多媒体": "媒体", "符号": "符号", "鼠标": "鼠标", "蜂鸣器": "蜂鸣器", "自定义": "自定义" };
     const g = map[curCat] || curCat;
     const list = (window.KEYCODES || []).filter((k) => k.g === g || (curCat === "符号" && k.g === "数字"));
     const row = document.createElement("div");
@@ -815,7 +822,7 @@
     arep: "按下「原键」后再按同一个键，会改发「替换为」。选项里 8=启用、1=默认、2=双向。",
   };
 
-  const adv = { counts: { td: 0, combo: 0, ko: 0, arep: 0 }, data: {}, kind: "td" };
+  const adv = { counts: { td: 0, combo: 0, ko: 0, arep: 0 }, data: {}, kind: "key" };
 
   const u16 = (b0, b1) => (b0 | (b1 << 8)) & 0xffff;
 
@@ -871,7 +878,7 @@
   }
 
   async function advLoad() {
-    const kind = adv.kind;
+    const kind = adv.kind === "key" ? "td" : adv.kind;
     let n = adv.counts[kind] || 0;
     let rows = [];
     if (n > 0) {
@@ -930,21 +937,417 @@
     return inp;
   }
 
-  function renderAdv() {
-    const kind = adv.kind;
-    const box = $("#advTable");
-    const rows = adv.data[kind] || [];
-    box.innerHTML = "";
-    const raw = adv.rawCounts ? "　·　能力响应 " + adv.rawCounts : "";
-    $("#advHint").textContent = ADV_DESC[kind] + ADV_TIP + "　（共 " + (adv.counts[kind] || 0) + " 条）" + raw;
-    $$("#advTabs .ltab").forEach((b) => b.classList.toggle("active", b.dataset.kind === kind));
+  /* ---- 原键记录：启用高级行为前，这个键原本是什么 ---- */
+  const ORIGIN_KEY = "imk60.tdOrigin";
 
-    if (!S.on) {
-      box.innerHTML = '<div class="muted">连接键盘后读取</div>';
+  function loadOrigin() {
+    try { return JSON.parse(localStorage.getItem(ORIGIN_KEY) || "{}"); } catch (e) { return {}; }
+  }
+  function saveOrigin(m) {
+    try { localStorage.setItem(ORIGIN_KEY, JSON.stringify(m)); } catch (e) { /* ignore */ }
+  }
+  function originKey(sel) { return "0," + sel.r + "," + sel.c; }
+
+  function rememberOrigin(sel, code) {
+    const m = loadOrigin();
+    m[originKey(sel)] = code;
+    saveOrigin(m);
+  }
+
+  /* 查原键：先查本地记录，再查"连接时的备份快照" */
+  function lookupOrigin(sel) {
+    const m = loadOrigin();
+    const k = originKey(sel);
+    if (m[k] !== undefined) return { code: m[k], from: "记录" };
+    try {
+      const snap = JSON.parse(localStorage.getItem("imk60.backup") || "null");
+      const arr = snap && snap.keymap && snap.keymap["0"];
+      if (arr) {
+        const code = arr[sel.r * S.cols + sel.c];
+        if (code !== undefined && tdSlotOf(code) < 0) return { code: code, from: "备份" };
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  /* ---- 以键为中心的编辑 ---- */
+  function tdSlotOf(code) {
+    return code >= 0x5700 && code <= 0x5707 ? code - 0x5700 : -1;
+  }
+
+  function usedTdSlots() {
+    const used = new Set();
+    const layer = S.km[0];
+    if (layer) {
+      for (let i = 0; i < layer.length; i++) {
+        const s = tdSlotOf(layer[i]);
+        if (s >= 0) used.add(s);
+      }
+    }
+    return used;
+  }
+
+  function renderAdvKey() {
+    const box = $("#advTable");
+    const hint = $("#advHint");
+    $$("#advTabs .ltab").forEach((b) => b.classList.toggle("active", b.dataset.kind === "key"));
+    hint.textContent = "点上方键盘上的键 → 配置这个键的四种敲击行为（作用于主层）";
+    box.innerHTML = "";
+
+    if (!S.on) { box.innerHTML = '<div class="muted">连接键盘后可用</div>'; return; }
+
+    const sel = S.advKey;
+    if (!sel) {
+      box.innerHTML = '<div class="keEmpty"><div class="keEmptyTitle">先选一个键</div>' +
+        '<div class="muted">点上方键盘里的任意键，这里就会出现它的高级行为设置。</div></div>';
       return;
     }
+
+    const code = kcAt(sel.r, sel.c, 0);
+    const slot = tdSlotOf(code);
+    const keyName = kcOf(kcAt(sel.r, sel.c, 0) ? 0 : 0).t;
+    const baseInfo = kcOf(code);
+    const title = slot >= 0 ? "已启用高级行为" : (baseInfo.n || baseInfo.t || "这个键");
+
+    if (slot < 0) {
+      const wrap = document.createElement("div");
+      wrap.className = "keEmpty";
+      wrap.innerHTML = '<div class="keEmptyTitle"></div><div class="muted">启用后可以设置：单击 / 长按 / 双击 / 单击后再按住，分别输出什么键。</div>';
+      wrap.querySelector(".keEmptyTitle").textContent = (baseInfo.n || baseInfo.t || "这个键") + " 还没有高级行为";
+      const btn = document.createElement("button");
+      btn.className = "softbtn";
+      btn.textContent = "为这个键启用";
+      btn.onclick = () => enableTdFor(sel);
+      wrap.appendChild(btn);
+      box.appendChild(wrap);
+      return;
+    }
+
+    const entry = (adv.data.td || [])[slot];
+    if (!entry) {
+      box.innerHTML = '<div class="muted">槽位 TD' + slot + ' 读取失败，请切到别的页再回来</div>';
+      return;
+    }
+
+    const ed = document.createElement("div");
+    ed.className = "keyEditor";
+
+    const head = document.createElement("div");
+    head.className = "keHead";
+    const hl = document.createElement("div");
+    hl.innerHTML = '<div class="ltitle">' + (baseInfo.t || "") + '<span class="keSlot">TD' + slot + '</span></div>' +
+      '<div class="muted">矩阵 ' + sel.r + ',' + sel.c + ' · 主层</div>';
+    const rm = document.createElement("button");
+    rm.className = "softbtn danger";
+    rm.textContent = "移除";
+    rm.onclick = () => removeTdFrom(sel, slot);
+    head.appendChild(hl); head.appendChild(rm);
+    ed.appendChild(head);
+
+    const rows = document.createElement("div");
+    rows.className = "keRows";
+    const fields = [
+      ["onTap", "单击", "点一下输出"],
+      ["onHold", "长按", "按住不放输出"],
+      ["onDt", "双击", "快速点两下输出"],
+      ["onTh", "单击后长按", "点一下再按住输出"],
+    ];
+    fields.forEach(([field, label, desc]) => {
+      const row = document.createElement("div");
+      row.className = "keRow";
+      const lab = document.createElement("span");
+      lab.textContent = label;
+      const cell = document.createElement("div");
+      cell.className = "advCell" + (entry[field] ? "" : " empty");
+      cell.textContent = entry[field] ? kcOf(entry[field]).t : "未设置（用「无」= 不触发）";
+      cell.title = desc + " · 左键选择，右键清空";
+      cell.onclick = () => openKcPicker("td", slot, field, entry[field]);
+      cell.oncontextmenu = (e) => { e.preventDefault(); setAdvField("td", slot, field, 0); };
+      row.appendChild(lab); row.appendChild(cell);
+      rows.appendChild(row);
+    });
+    ed.appendChild(rows);
+
+    const term = document.createElement("div");
+    term.className = "keTerm";
+    const tl = document.createElement("span");
+    tl.textContent = "判定 ms";
+    const tinp = document.createElement("input");
+    tinp.className = "advNum";
+    tinp.type = "number";
+    tinp.min = "0";
+    tinp.max = "65535";
+    tinp.value = entry.term;
+    tinp.onchange = () => {
+      entry.term = Math.max(0, Math.min(65535, Number(tinp.value) || 0));
+      advWrite("td", slot, entry).then(() => toast("判定时间已保存", "ok")).catch((e) => toast("写入失败：" + e.message, "err"));
+    };
+    term.appendChild(tl); term.appendChild(tinp);
+    ed.appendChild(term);
+
+    const tip = document.createElement("div");
+    tip.className = "keTip";
+    const orig = lookupOrigin(sel);
+    const origText = orig ? "原键：" + kcOf(orig.code).t + "（" + hx(orig.code) + "，来自" + orig.from + "）" : "原键：未记录，移除时会改成「无」";
+    tip.textContent = origText + "　·　判定填 0 = 使用全局 tapping term　·　TD 槽位已用 " + usedTdSlots().size + " / 8";
+    ed.appendChild(tip);
+
+    box.appendChild(ed);
+  }
+
+  async function ensureTdLoaded() {
+    if (!adv.loaded) { await advReadCounts(); adv.loaded = true; }
+    if (!adv.data.td) {
+      const rows = [];
+      for (let i = 0; i < (adv.counts.td || 0); i++) {
+        try { rows.push(await advRead("td", i)); } catch (e) { rows.push(null); }
+      }
+      adv.data.td = rows;
+    }
+  }
+
+  async function enableTdFor(sel) {
+    await ensureTdLoaded();
+    const used = usedTdSlots();
+    let slot = -1;
+    for (let i = 0; i < 8; i++) { if (!used.has(i)) { slot = i; break; } }
+    if (slot < 0) return toast("8 个 TD 槽位已用满，请先移除一个", "err");
+
+    const entry = { onTap: 0, onHold: 0, onDt: 0, onTh: 0, term: 0 };
+    const before = kcAt(sel.r, sel.c, 0);
+    if (before !== undefined && tdSlotOf(before) < 0) rememberOrigin(sel, before);
+    try {
+      adv.data.td[slot] = entry;
+      await advWrite("td", slot, entry);
+      await applyKeycode(0x5700 + slot, { r: sel.r, c: sel.c });
+      toast("已为这个键分配 TD" + slot, "ok");
+      renderAdvKey();
+    } catch (e) {
+      toast("启用失败：" + e.message, "err");
+    }
+  }
+
+  async function removeTdFrom(sel, slot) {
+    const orig = lookupOrigin(sel);
+    const target = orig ? orig.code : 0x0000;
+    const desc = orig ? "恢复成原来的「" + kcOf(target).t + "」" : "改成「无」（没找到原键记录）";
+    if (!confirm("移除这个键的高级行为？" + desc + "，并清空 TD" + slot)) return;
+    try {
+      const entry = { onTap: 0, onHold: 0, onDt: 0, onTh: 0, term: 0 };
+      adv.data.td[slot] = entry;
+      await advWrite("td", slot, entry);
+      await applyKeycode(target, { r: sel.r, c: sel.c });
+      const m = loadOrigin();
+      delete m[originKey(sel)];
+      saveOrigin(m);
+      toast(orig ? "已还原为 " + kcOf(target).t : "已移除", "ok");
+      renderAdvKey();
+    } catch (e) {
+      toast("移除失败：" + e.message, "err");
+    }
+  }
+
+  const MOD_BITS = [["LC", 0x01], ["LS", 0x02], ["LA", 0x04], ["LG", 0x08],
+                    ["RC", 0x10], ["RS", 0x20], ["RA", 0x40], ["RG", 0x80]];
+
+  function entCard(name) {
+    const card = document.createElement("div");
+    card.className = "entCard";
+    const head = document.createElement("div");
+    head.className = "entHead";
+    const t = document.createElement("span");
+    t.className = "entName";
+    t.textContent = name;
+    head.appendChild(t);
+    card.appendChild(head);
+    return card;
+  }
+
+  function entLine() {
+    const d = document.createElement("div");
+    d.className = "entLine";
+    for (let i = 0; i < arguments.length; i++) d.appendChild(arguments[i]);
+    return d;
+  }
+
+  function entText(text, cls) {
+    const s = document.createElement("span");
+    s.className = cls || "entLbl";
+    s.textContent = text;
+    return s;
+  }
+
+  function entKey(kind, idx, field, code) {
+    const d = document.createElement("div");
+    d.className = "entKey" + (code ? "" : " empty");
+    d.textContent = code ? kcOf(code).t : "无";
+    d.title = "左键选择键码 · 右键清空";
+    d.onclick = () => openKcPicker(kind, idx, field, code);
+    d.oncontextmenu = (e) => { e.preventDefault(); setAdvField(kind, idx, field, 0); };
+    return d;
+  }
+
+  function maskChips(kind, idx, entry, field, items, labelText, maxBit) {
+    const wrap = document.createElement("div");
+    wrap.className = "chips";
+    items.forEach(([label, bit]) => {
+      const b = document.createElement("button");
+      b.className = "chip" + ((entry[field] & bit) ? " on" : "");
+      b.textContent = label;
+      b.onclick = () => {
+        entry[field] = (entry[field] ^ bit) & (maxBit || 0xff);
+        advWrite(kind, idx, entry)
+          .then(() => renderAdv())
+          .catch((e) => toast("写入失败：" + e.message, "err"));
+      };
+      wrap.appendChild(b);
+    });
+    return entLine(entText(labelText), wrap);
+  }
+
+  function clearBtn(text, fn) {
+    const b = document.createElement("button");
+    b.className = "ghostbtn small";
+    b.textContent = text;
+    b.onclick = fn;
+    return b;
+  }
+
+  function renderComboCards(rows) {
+    const box = $("#advTable");
+    rows.forEach((entry, i) => {
+      if (!entry) return;
+      const commit = () => advWrite("combo", i, entry)
+        .then(() => renderAdv())
+        .catch((e) => toast("写入失败：" + e.message, "err"));
+      const card = entCard("组合键 " + (i + 1));
+      card.querySelector(".entHead").appendChild(clearBtn("清空", () => {
+        entry.k = [0, 0, 0, 0];
+        entry.out = 0;
+        commit();
+      }));
+      const line = document.createElement("div");
+      line.className = "entLine";
+      for (let j = 0; j < 4; j++) {
+        line.appendChild(entKey("combo", i, "k" + j, entry.k[j]));
+        if (j < 3) line.appendChild(entText("+", "entArrow"));
+      }
+      line.appendChild(entText("→", "entArrow"));
+      line.appendChild(entKey("combo", i, "out", entry.out));
+      card.appendChild(line);
+      card.appendChild(entText("同时按下左边的键（没用到留「无」）→ 触发右边的键", "entTip"));
+      box.appendChild(card);
+    });
+  }
+
+  function renderKoCards(rows) {
+    const box = $("#advTable");
+    rows.forEach((entry, i) => {
+      if (!entry) return;
+      const card = entCard("键改写 " + (i + 1));
+      if (!(entry.opts & 0x80)) card.classList.add("off");
+      const head = card.querySelector(".entHead");
+
+      const sw = document.createElement("label");
+      sw.className = "switch mini";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = !!(entry.opts & 0x80);
+      cb.onchange = () => {
+        entry.opts = cb.checked ? (entry.opts | 0x80) : (entry.opts & ~0x80);
+        advWrite("ko", i, entry).then(() => renderAdv()).catch((e) => toast("写入失败：" + e.message, "err"));
+      };
+      const sp = document.createElement("span");
+      sw.appendChild(cb); sw.appendChild(sp);
+      head.appendChild(sw);
+      head.appendChild(clearBtn("清空", () => {
+        entry.trigger = 0; entry.repl = 0; entry.layers = 0;
+        entry.tmods = 0; entry.negmods = 0; entry.smods = 0; entry.opts = 0;
+        advWrite("ko", i, entry).then(() => renderAdv()).catch((e) => toast("写入失败：" + e.message, "err"));
+      }));
+
+      card.appendChild(entLine(
+        entText("按下"),
+        entKey("ko", i, "trigger", entry.trigger),
+        entText("→ 改成", "entArrow"),
+        entKey("ko", i, "repl", entry.repl)
+      ));
+
+      const layerItems = [];
+      for (let l = 0; l < Math.max(3, S.layers); l++) layerItems.push(["层" + l, 1 << l]);
+      card.appendChild(maskChips("ko", i, entry, "layers", layerItems, "只在哪些层生效", 0xffff));
+
+      card.appendChild(maskChips("ko", i, entry, "tmods", MOD_BITS, "必须按住", 0xff));
+      card.appendChild(maskChips("ko", i, entry, "smods", MOD_BITS, "屏蔽这些修饰", 0xff));
+
+      box.appendChild(card);
+    });
+  }
+
+  function renderArepCards(rows) {
+    const box = $("#advTable");
+    const OPTS = [["双向", 0x02], ["忽略左右", 0x04], ["设为默认替换", 0x01]];
+    rows.forEach((entry, i) => {
+      if (!entry) return;
+      const card = entCard("重复键 " + (i + 1));
+      if (!(entry.opts & 0x08)) card.classList.add("off");
+      const head = card.querySelector(".entHead");
+
+      const sw = document.createElement("label");
+      sw.className = "switch mini";
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.checked = !!(entry.opts & 0x08);
+      cb.onchange = () => {
+        entry.opts = cb.checked ? (entry.opts | 0x08) : (entry.opts & ~0x08);
+        advWrite("arep", i, entry).then(() => renderAdv()).catch((e) => toast("写入失败：" + e.message, "err"));
+      };
+      const sp = document.createElement("span");
+      sw.appendChild(cb); sw.appendChild(sp);
+      head.appendChild(sw);
+      head.appendChild(clearBtn("清空", () => {
+        entry.kc = 0; entry.alt = 0; entry.allowed = 0; entry.opts = 0;
+        advWrite("arep", i, entry).then(() => renderAdv()).catch((e) => toast("写入失败：" + e.message, "err"));
+      }));
+
+      card.appendChild(entLine(
+        entText("按"),
+        entKey("arep", i, "kc", entry.kc),
+        entText("→ 再按一次 →", "entArrow"),
+        entKey("arep", i, "alt", entry.alt)
+      ));
+      card.appendChild(maskChips("arep", i, entry, "allowed", MOD_BITS, "允许的修饰", 0xff));
+      const optWrap = document.createElement("div");
+      optWrap.className = "chips";
+      OPTS.forEach(([label, bit]) => {
+        const b = document.createElement("button");
+        b.className = "chip" + ((entry.opts & bit) ? " on" : "");
+        b.textContent = label;
+        b.onclick = () => {
+          entry.opts = (entry.opts ^ bit) & 0xff;
+          advWrite("arep", i, entry).then(() => renderAdv()).catch((e) => toast("写入失败：" + e.message, "err"));
+        };
+        optWrap.appendChild(b);
+      });
+      card.appendChild(entLine(entText("选项"), optWrap));
+
+      box.appendChild(card);
+    });
+  }
+
+  function renderAdv() {
+    const kind = adv.kind;
+    if (kind === "key") return renderAdvKey();
+
+    const box = $("#advTable");
+    box.innerHTML = "";
+    $$("#advTabs .ltab").forEach((b) => b.classList.toggle("active", b.dataset.kind === kind));
+
+    if (!S.on) { box.innerHTML = '<div class="muted">连接键盘后读取</div>'; return; }
+
+    const rows = adv.data[kind] || [];
     if (!rows.length) {
-      box.innerHTML = '<div class="muted">没读到条目 —— 能力响应：' + (adv.rawCounts || "无") + '</div>';
+      $("#advHint").textContent = "没读到条目 —— 能力响应：" + (adv.rawCounts || "无");
       const retry = document.createElement("button");
       retry.className = "ltab";
       retry.style.cssText = "height:30px;padding:0 16px;font-size:12.5px;margin-top:10px";
@@ -953,58 +1356,11 @@
       box.appendChild(retry);
       return;
     }
+    $("#advHint").textContent = ADV_DESC[kind] + "　（共 " + rows.length + " 条 · 改哪项写哪项）";
 
-    const cols = ADV_COLS[kind];
-    const head = document.createElement("div");
-    head.className = "advRow advHead";
-    head.style.gridTemplateColumns = "44px repeat(" + cols.length + ", 1fr)";
-    head.innerHTML = "<div>#</div>" + cols.map((c) => "<div>" + c + "</div>").join("");
-    box.appendChild(head);
-
-    rows.forEach((entry, i) => {
-      const row = document.createElement("div");
-      row.className = "advRow";
-      row.style.gridTemplateColumns = "44px repeat(" + cols.length + ", 1fr)";
-      const id = document.createElement("div");
-      id.className = "idx";
-      id.textContent = "L" + i;
-      row.appendChild(id);
-      if (!entry) {
-        row.appendChild(cellBtn("读取失败", () => {}));
-        box.appendChild(row);
-        return;
-      }
-      const kcCell = (val, field, label) => cellBtn(
-        label,
-        () => openKcPicker(kind, i, field, val),
-        () => setAdvField(kind, i, field, 0)
-      );
-      const commit = () => advWrite(kind, i, entry).catch((e) => toast("写入失败：" + e.message, "err"));
-
-      if (kind === "td") {
-        row.appendChild(kcCell(entry.onTap, "onTap", kcOf(entry.onTap).t));
-        row.appendChild(kcCell(entry.onHold, "onHold", kcOf(entry.onHold).t));
-        row.appendChild(kcCell(entry.onDt, "onDt", kcOf(entry.onDt).t));
-        row.appendChild(kcCell(entry.onTh, "onTh", kcOf(entry.onTh).t));
-        row.appendChild(numInput(entry.term, 65535, (v) => { entry.term = v; commit(); }));
-      } else if (kind === "combo") {
-        for (let j = 0; j < 4; j++) row.appendChild(kcCell(entry.k[j], "k" + j, kcOf(entry.k[j]).t));
-        row.appendChild(kcCell(entry.out, "out", kcOf(entry.out).t));
-      } else if (kind === "ko") {
-        row.appendChild(kcCell(entry.trigger, "trigger", kcOf(entry.trigger).t));
-        row.appendChild(kcCell(entry.repl, "repl", kcOf(entry.repl).t));
-        row.appendChild(numInput(entry.layers, 65535, (v) => { entry.layers = v; commit(); }));
-        row.appendChild(numInput(entry.tmods, 255, (v) => { entry.tmods = v; commit(); }));
-        row.appendChild(numInput(entry.smods, 255, (v) => { entry.smods = v; commit(); }));
-        row.appendChild(numInput(entry.opts, 255, (v) => { entry.opts = v; commit(); }));
-      } else {
-        row.appendChild(kcCell(entry.kc, "kc", kcOf(entry.kc).t));
-        row.appendChild(kcCell(entry.alt, "alt", kcOf(entry.alt).t));
-        row.appendChild(numInput(entry.allowed, 255, (v) => { entry.allowed = v; commit(); }));
-        row.appendChild(numInput(entry.opts, 255, (v) => { entry.opts = v; commit(); }));
-      }
-      box.appendChild(row);
-    });
+    if (kind === "combo") return renderComboCards(rows);
+    if (kind === "ko") return renderKoCards(rows);
+    return renderArepCards(rows);
   }
 
   /* 键码弹窗 */
@@ -1068,54 +1424,95 @@
       await advReadCounts();
       adv.loaded = true;
     }
+    if (adv.kind === "key") { await ensureTdLoaded(); renderAdvKey(); return; }
     await advLoad();
   }
 
   /* ================= 蜂鸣器 ================= */
+  const BUZZ_SLOTS = [
+    { r: 1, c: 12, key: "buzzerVoice", name: "蜂鸣器音效切换", hint: "每按一次换一种提示音" },
+    { r: 1, c: 13, key: "buzzerOnOff", name: "蜂鸣器开关", hint: "开/关蜂鸣器" },
+  ];
+  let buzzDetected = [];
+
+  function registerBuzzCode(code, name) {
+    if (!code || code === 0 || code === 1) return false;
+    if (!KC.has(code)) {
+      const e = { c: code, t: name.replace("蜂鸣器", "蜂鸣"), s: "", n: name, g: "蜂鸣器" };
+      KC.set(code, e);
+      window.KEYCODES.push(e);
+      if (window.KC_GROUPS.indexOf("蜂鸣器") < 0) window.KC_GROUPS.push("蜂鸣器");
+    }
+    return true;
+  }
+
+  function detectBuzzerCodes() {
+    buzzDetected = [];
+    if (!S.km[1]) return;
+    BUZZ_SLOTS.forEach((slot) => {
+      const code = S.km[1][slot.r * S.cols + slot.c];
+      if (registerBuzzCode(code, slot.name)) {
+        buzzDetected.push({ code: code, name: slot.name, hint: slot.hint, pos: slot.r + "," + slot.c });
+      }
+    });
+    diag("蜂鸣器键码: " + buzzDetected.map((b) => b.name + "=" + hx(b.code)).join(" / "));
+    renderBuzzCodes();
+  }
+
+  function renderBuzzCodes() {
+    const box = $("#buzzCodes");
+    if (!box) return;
+    if (!S.on) { box.textContent = "连接键盘后自动读取…"; return; }
+    if (!buzzDetected.length) {
+      box.textContent = "Fn 层这两个位置没有读到有效键码（可能是 0 或穿透）";
+      return;
+    }
+    box.innerHTML = "";
+    buzzDetected.forEach((b) => {
+      const row = document.createElement("div");
+      row.className = "buzzCode";
+      const left = document.createElement("div");
+      left.innerHTML = '<div class="nm">' + b.name + '</div><div class="pos">' + b.hint + " · 矩阵 " + b.pos + "</div>";
+      const right = document.createElement("div");
+      right.className = "hex";
+      right.textContent = hx(b.code);
+      row.appendChild(left); row.appendChild(right);
+      box.appendChild(row);
+    });
+  }
+
   async function readBuzzer() {
     const st = $("#buzzState");
     const rawBox = $("#buzzRaw");
+    renderBuzzCodes();
     if (!S.on) {
       st.textContent = "未连接";
       st.className = "buzzState";
-      $("#swAudio").disabled = true;
-      $("#swClicky").disabled = true;
       return;
     }
     try {
       const a = await xfer([0x08, 0x04, 0x01], 700);
       const c = await xfer([0x08, 0x04, 0x02], 700);
-      const onVal = a[3], clickyVal = c[3];
-      $("#swAudio").checked = !!onVal;
-      $("#swClicky").checked = !!clickyVal;
-      $("#swAudio").disabled = false;
-      $("#swClicky").disabled = false;
-      rawBox.textContent = "音频通道原始值：enable=" + onVal + "  clicky=" + clickyVal;
-      st.textContent = "已读取固件音频状态";
-      st.className = "buzzState";
-      S.audio = { supported: true };
-      diag("蜂鸣器: enable=" + onVal + " clicky=" + clickyVal);
-    } catch (e) {
-      S.audio = { supported: false };
-      $("#swAudio").disabled = true;
-      $("#swClicky").disabled = true;
-      rawBox.textContent = "音频通道无响应（" + e.message + "）";
-      st.textContent = "⚠ 固件没有开放音频通道（未编译 AUDIO 的 VIA 接口），只能用键码开关。";
+      rawBox.textContent = "音频通道原始值：enable=" + a[3] + "  clicky=" + c[3];
+      $("#swAudio").checked = !!a[3];
+      $("#swClicky").checked = !!c[3];
+      st.textContent = "音频通道可读但写入不生效 —— 已停用，请用右上「用键码控制」";
       st.className = "buzzState warn";
-      diag("蜂鸣器读取失败: " + e.message);
+      diag("蜂鸣器 enable=" + a[3] + " clicky=" + c[3]);
+    } catch (e) {
+      rawBox.textContent = "音频通道无响应（" + e.message + "）";
+      st.textContent = "固件没有音频通道 —— 请用右上「用键码控制」";
+      st.className = "buzzState warn";
     }
   }
 
   async function setBuzzer(field, val) {
+    /* 固件不保存该字段，保留函数以便将来固件更新后启用 */
     if (!S.on) return toast("还没连接键盘", "err");
     try {
       await xfer([0x07, 0x04, field, val ? 1 : 0], 700);
-      toast(val ? "已开启" : "已关闭", "ok");
-      setTimeout(readBuzzer, 120);
-    } catch (e) {
-      toast("写入失败：" + e.message, "err");
-      readBuzzer();
-    }
+    } catch (e) { /* ignore */ }
+    readBuzzer();
   }
 
   /* ================= 按键测试 ================= */
@@ -1309,13 +1706,14 @@
     $("#hint").textContent =
       v === "keymap" ? "点键盘上的键，在下方选择新键码；也可以把键码拖到键上交换" :
       v === "light" ? "左键点击键盘上的键逐键上色，右键清除" :
+      v === "advanced" ? "点键盘上的键，为它配置四种敲击行为（作用于主层）" :
       v === "test" ? "按下键盘上的键，上方会实时高亮" :
       "连接键盘时自动备份，可随时恢复";
     renderRail();
     renderBoard();
     if (v === "keymap") { renderSelChip(); renderPicker(); }
     if (v === "advanced") { enterAdvanced(); }
-    if (v === "buzzer") { readBuzzer(); }
+    if (v === "buzzer") { readBuzzer(); renderBuzzCodes(); }
     if (v === "light") {
       renderLight();
       buildDeco();
@@ -1389,6 +1787,7 @@
       $("#devTag").className = "devTag on";
       enterApp();
 
+      detectBuzzerCodes();
       S.light = await readLight();
       renderLight();
       readLeds().then(() => { updateLedInfo(); buildDeco(); });
@@ -1423,6 +1822,7 @@
     $("#devCard").onclick = () => { if (S.on) enterApp(); else connect(); };
     $("#addCard").onclick = connect;
     $("#btnHome").onclick = backHome;
+    $("#btnGoKeymap").onclick = () => setView("keymap");
     $("#swAudio").onchange = (e) => setBuzzer(1, e.target.checked);
     $("#swClicky").onchange = (e) => setBuzzer(2, e.target.checked);
     $("#homeDiag2").onclick = () => { $("#diagBar").hidden = false; S.diag = true; };

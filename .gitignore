@@ -3,6 +3,7 @@ _private/
 app/backups/
 probe/device_dump.json
 probe/dump-*.json
+app/shot-*.png
 
 # Python
 __pycache__/
