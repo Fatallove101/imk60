@@ -21,6 +21,15 @@
 | --- | --- |
 | ![](docs/screenshots/02-keymap.png) | ![](docs/screenshots/04-lighting.png) |
 
+## 在线使用
+
+直接打开（**Chrome / Edge**）：
+
+**https://fatallove101.github.io/imk60/**
+
+> 在线版没有后端：备份只存在浏览器本地（localStorage），不会写到磁盘目录。
+> 本地版仍然推荐用下面的 `启动.bat`，备份会同时写一份到 `app/backups/`。
+
 ## 运行
 
 1. 安装 **Python 3.8+**（安装时勾选 `Add python.exe to PATH`）
@@ -70,3 +79,12 @@
 ## License
 
 见仓库根目录 `LICENSE`。
+
+## 部署说明
+
+本项目通过 GitHub Actions 发布到 GitHub Pages：
+
+- 工作流：`.github/workflows/pages.yml`（把 `app/` 目录作为站点根发布）
+- 仓库 Settings → Pages → Source 选 **GitHub Actions**
+- 推送到 `main` 后自动构建发布
+
