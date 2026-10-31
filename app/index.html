@@ -218,12 +218,16 @@
       <!-- 备份 -->
       <div class="view" id="viewBackup" hidden>
         <div class="ltitle">备份与恢复</div>
-        <div class="muted" style="margin-bottom:16px">连接键盘时会自动备份全部层。备份同时存到浏览器本地和 <code>app\backups\</code> 目录。</div>
+        <div class="muted" style="margin-bottom:16px">连接键盘时会自动备份全部层。备份会存到浏览器本地；本地版还会写一份到 <code>app\backups\</code>，在线版可「导出为文件」保存。</div>
         <div class="btnrow">
           <button id="btnBackup" class="softbtn">立即备份</button>
+          <button id="btnExport" class="softbtn">导出为文件</button>
+          <button id="btnImport" class="softbtn">从文件恢复</button>
           <button id="btnRestore" class="softbtn danger">恢复最近备份</button>
+          <input type="file" id="fileInput" accept=".json,application/json" hidden>
         </div>
         <div class="backupInfo" id="backupInfo">—</div>
+        <div class="backupHint" id="backupHint"></div>
       </div>
     </section>
   </main>

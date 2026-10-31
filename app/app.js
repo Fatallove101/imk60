@@ -1639,35 +1639,77 @@
     };
   }
 
+  function backupName(snap) {
+    const d = new Date(snap.ts || Date.now());
+    const p = (n) => String(n).padStart(2, "0");
+    return "imk60-backup-" + d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) +
+      "-" + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds()) + ".json";
+  }
+
+  function downloadJSON(obj, name) {
+    try {
+      const blob = new Blob([JSON.stringify(obj, null, 1)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+      return true;
+    } catch (e) {
+      toast("下载失败：" + e.message, "err");
+      return false;
+    }
+  }
+
+  function updateBackendHint() {
+    const el = $("#backupHint");
+    if (!el) return;
+    const isLocal = (location.hostname === "127.0.0.1" || location.hostname === "localhost");
+    if (!isLocal || S.noBackend) {
+      el.innerHTML = "<b>当前是静态托管（无后端）</b>：备份存在浏览器本地，并可通过「导出为文件」保存成 .json。" +
+        "<br>建议每次改完键位后导出一次，换浏览器/清缓存后可用「从文件恢复」找回。";
+    } else {
+      el.innerHTML = "<b>本地版</b>：备份会同时写入 <code>app/backups/</code> 目录（服务器端），" +
+        "并保留一份在浏览器本地。";
+    }
+  }
+
   async function backup(silent) {
     if (!S.on) return toast("还没连接键盘", "err");
     const snap = snapshot();
     localStorage.setItem("imk60.backup", JSON.stringify(snap));
-    let file = "本地";
+
+    let file = "浏览器本地";
+    let serverOk = false;
     try {
       const res = await fetch("/backup", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snap),
       });
-      const js = await res.json();
-      if (js.file) file = js.file;
-    } catch (e) { /* 本地已存 */ }
-    $("#backupInfo").textContent = "最近备份：" + file + "\n时间：" + snap.ts.slice(0, 19).replace("T", " ");
-    if (!silent) toast("已备份", "ok");
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const js2 = await res.json();
+      if (js2 && js2.file) { file = js2.file; serverOk = true; }
+    } catch (e) {
+      S.noBackend = true;
+    }
+
+    if (serverOk) {
+      S.noBackend = false;
+    } else if (!silent) {
+      const name = backupName(snap);
+      if (downloadJSON(snap, name)) file = "已下载 " + name;
+    }
+
+    $("#backupInfo").textContent = "最近备份：" + file + "\n时间：" + String(snap.ts).slice(0, 19).replace("T", " ");
+    updateBackendHint();
+    if (!silent) toast(serverOk ? "已备份到 app/backups/" : "已备份（浏览器 + 文件）", "ok");
   }
 
-  async function restore() {
-    if (!S.on) return toast("还没连接键盘", "err");
-    let snap = null;
-    try {
-      const res = await fetch("/backup/last");
-      if (res.ok) snap = await res.json();
-    } catch (e) { /* ignore */ }
-    if (!snap) {
-      const raw = localStorage.getItem("imk60.backup");
-      if (raw) snap = JSON.parse(raw);
-    }
-    if (!snap) return toast("没有可用备份", "err");
-    if (!confirm("用 " + String(snap.ts).slice(0, 19).replace("T", " ") + " 的备份覆盖键盘？")) return;
+  async function applySnapshot(snap, from) {
+    if (!snap || !snap.keymap) return toast("备份文件格式不对", "err");
+    const when = String(snap.ts || "").slice(0, 19).replace("T", " ");
+    if (!confirm("用「" + (from || "备份") + "」（" + when + "）覆盖键盘？")) return;
 
     setConn("恢复中…", "busy");
     try {
@@ -1694,6 +1736,35 @@
     }
   }
 
+  async function restore() {
+    if (!S.on) return toast("还没连接键盘", "err");
+    let snap = null;
+    let from = "";
+    try {
+      const res = await fetch("/backup/last");
+      if (res.ok) { snap = await res.json(); from = "服务器备份 " + (snap.file || ""); }
+    } catch (e) { /* 静态托管没有接口 */ }
+    if (!snap) {
+      const raw = localStorage.getItem("imk60.backup");
+      if (raw) { snap = JSON.parse(raw); from = "浏览器本地备份"; }
+    }
+    if (!snap) return toast("没有可用备份，试试「从文件恢复」", "err");
+    await applySnapshot(snap, from);
+  }
+
+  function importFromFile(file) {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const snap = JSON.parse(String(reader.result));
+        await applySnapshot(snap, "文件 " + file.name);
+      } catch (e) {
+        toast("读取失败：" + e.message, "err");
+      }
+    };
+    reader.readAsText(file);
+  }
+
   /* ================= 视图 ================= */
   const VIEWS = { keymap: "viewKeymap", advanced: "viewAdvanced", light: "viewLight", buzzer: "viewBuzzer", test: "viewTest", backup: "viewBackup" };
   function setView(v) {
@@ -1714,6 +1785,7 @@
     if (v === "keymap") { renderSelChip(); renderPicker(); }
     if (v === "advanced") { enterAdvanced(); }
     if (v === "buzzer") { readBuzzer(); renderBuzzCodes(); }
+    if (v === "backup") { updateBackendHint(); }
     if (v === "light") {
       renderLight();
       buildDeco();
@@ -1828,6 +1900,21 @@
     $("#homeDiag2").onclick = () => { $("#diagBar").hidden = false; S.diag = true; };
     $("#homeHelp").onclick = () => toast("选择键盘 → 授权 → 自动备份 → 改键，改完即时生效", "ok");
     $("#btnBackup").onclick = () => backup(false);
+    $("#btnExport").onclick = () => {
+      if (!S.on) return toast("还没连接键盘", "err");
+      const snap = snapshot();
+      const name = backupName(snap);
+      if (downloadJSON(snap, name)) {
+        $("#backupInfo").textContent = "已导出：" + name;
+        toast("已导出 " + name, "ok");
+      }
+    };
+    $("#btnImport").onclick = () => $("#fileInput").click();
+    $("#fileInput").onchange = (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (f) importFromFile(f);
+      e.target.value = "";
+    };
     $("#btnRestore").onclick = restore;
     $("#btnDiag").onclick = () => { $("#diagBar").hidden = false; S.diag = true; };
     $("#btnDiagClose").onclick = () => { $("#diagBar").hidden = true; S.diag = false; };
