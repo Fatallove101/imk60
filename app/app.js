@@ -475,6 +475,7 @@
     } catch (e) { toast("灯效写入失败：" + e.message, "err"); }
     renderEffects();
     startPreview();
+    scheduleSave();
   }
 
   async function pushParams() {
@@ -484,6 +485,7 @@
       await xfer([0x07, 0x41, L.id & 0xff, (L.id >> 8) & 0xff, L.speed, L.hue, L.sat, L.val]);
     } catch (e) { /* ignore */ }
     if (S.view === "light" && !pvRaf) startPreview();
+    scheduleSave();
   }
 
   async function fastSet(idx, h, s, v) {
@@ -497,11 +499,25 @@
   }
 
   let saveTimer = null;
+
+  /* VIA id_lighting_save = 0x09，需要带通道：
+     0x09 0x03 = rgb_matrix，0x09 0x41 = vialrgb(直控)，
+     0x09      = 老固件无通道写法。三条都发，不支持的会超时忽略。 */
+  async function saveLighting(silent) {
+    if (!S.light) return false;
+    const variants = [[0x09, 0x03], [0x09, 0x41], [0x09]];
+    let anyOk = false;
+    for (const v of variants) {
+      try { await xfer(v, 500); anyOk = true; } catch (e) { /* ignore */ }
+    }
+    diag("灯效保存: " + (anyOk ? "已发送" : "全部无响应"));
+    if (!silent) toast(anyOk ? "灯效已保存到键盘" : "保存命令无响应，固件可能不支持", anyOk ? "ok" : "err");
+    return anyOk;
+  }
+
   function scheduleSave() {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(async () => {
-      try { await xfer([0x09], 500); } catch (e) { /* 固件可能不支持，忽略 */ }
-    }, 1200);
+    saveTimer = setTimeout(() => { saveLighting(true); }, 1500);
   }
 
   async function paintKey(k) {
@@ -1895,6 +1911,7 @@
     $("#addCard").onclick = connect;
     $("#btnHome").onclick = backHome;
     $("#btnGoKeymap").onclick = () => setView("keymap");
+    $("#btnSaveLight").onclick = () => saveLighting(false);
     $("#swAudio").onchange = (e) => setBuzzer(1, e.target.checked);
     $("#swClicky").onchange = (e) => setBuzzer(2, e.target.checked);
     $("#homeDiag2").onclick = () => { $("#diagBar").hidden = false; S.diag = true; };
