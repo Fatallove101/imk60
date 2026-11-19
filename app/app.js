@@ -275,7 +275,7 @@
   }
 
   /* ================= 键码面板 ================= */
-  const CATS = ["基础", "修饰", "层", "高级", "功能", "多媒体", "符号", "鼠标", "小键盘", "蜂鸣器", "自定义"];
+  const CATS = ["基础", "修饰", "层", "高级", "功能", "多媒体", "符号", "鼠标", "小键盘", "宏", "蜂鸣器", "自定义"];
   let curCat = "基础";
 
   /* 完整 104 键布局：[键码, x, y, w, h]（单位 1u） */
@@ -1825,8 +1825,199 @@
     reader.readAsText(file);
   }
 
+  /* ================= 宏（VIA 宏区 = send_string 文本流） ================= */
+  const MACRO_COUNT = 16;
+  let MACRO_SIZE = 3307;
+  const SS_PREFIX = 0x01;
+  const SS_TAP = 0x01, SS_DOWN = 0x02, SS_UP = 0x03, SS_DELAY = 0x04;
+
+  S.macros = new Array(MACRO_COUNT).fill("");
+
+  const hex2 = (n) => (n & 0xff).toString(16).toUpperCase().padStart(2, "0");
+
+  /* 字节流 -> 可编辑文本 */
+  function decodeMacro(bytes) {
+    let s = "";
+    for (let i = 0; i < bytes.length; i++) {
+      const b = bytes[i];
+      if (b === 0) break;
+      if (b === SS_PREFIX) {
+        const code = bytes[++i];
+        if (code === SS_TAP) s += "{TAP:" + hex2(bytes[++i]) + "}";
+        else if (code === SS_DOWN) s += "{DOWN:" + hex2(bytes[++i]) + "}";
+        else if (code === SS_UP) s += "{UP:" + hex2(bytes[++i]) + "}";
+        else if (code === SS_DELAY) {
+          let d = "";
+          while (i + 1 < bytes.length && bytes[i + 1] >= 0x30 && bytes[i + 1] <= 0x39) d += String.fromCharCode(bytes[++i]);
+          if (d) s += "{DELAY:" + d + "}";
+        }
+      } else {
+        s += String.fromCharCode(b);
+      }
+    }
+    return s;
+  }
+
+  /* 可编辑文本 -> 字节流 */
+  function encodeMacro(text) {
+    const out = [];
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch === "{") {
+        const end = text.indexOf("}", i);
+        if (end > i) {
+          const body = text.slice(i + 1, end);
+          const p = body.indexOf(":");
+          const key = (p > 0 ? body.slice(0, p) : body).toUpperCase();
+          const val = p > 0 ? body.slice(p + 1) : "";
+          if (key === "DELAY" && /^\d+$/.test(val)) {
+            out.push(SS_PREFIX, SS_DELAY);
+            const ms = String(Math.min(65535, parseInt(val, 10)));
+            for (const c of ms) out.push(c.charCodeAt(0));
+            out.push(0x7c);
+            i = end;
+            continue;
+          }
+          const code = parseInt(val, 16);
+          if (!isNaN(code)) {
+            if (key === "TAP") out.push(SS_PREFIX, SS_TAP, code & 0xff);
+            else if (key === "DOWN") out.push(SS_PREFIX, SS_DOWN, code & 0xff);
+            else if (key === "UP") out.push(SS_PREFIX, SS_UP, code & 0xff);
+            i = end;
+            continue;
+          }
+        }
+      }
+      const c = ch.charCodeAt(0);
+      out.push(c > 0x7f ? 0x3f : c);   // 非 ASCII 用 '?'
+    }
+    return out;
+  }
+
+  async function readMacroBuffer() {
+    try {
+      const sz = await xfer([0x0d], 700);
+      const n = (sz[1] << 8) | sz[2];
+      if (n > 0 && n <= 8192) MACRO_SIZE = n;
+    } catch (e) { /* 用默认 3307 */ }
+
+    const bytes = new Uint8Array(MACRO_SIZE);
+    for (let off = 0; off < MACRO_SIZE; off += 28) {
+      const n = Math.min(28, MACRO_SIZE - off);
+      const r = await xfer([0x0e, (off >> 8) & 0xff, off & 0xff, n], 1200);
+      bytes.set(r.slice(4, 4 + n), off);
+    }
+    return bytes;
+  }
+
+  function splitMacros(bytes) {
+    const list = [];
+    let cur = [];
+    for (const b of bytes) {
+      if (b === 0) { list.push(cur); cur = []; if (list.length >= MACRO_COUNT) break; }
+      else cur.push(b);
+    }
+    while (list.length < MACRO_COUNT) list.push([]);
+    return list.slice(0, MACRO_COUNT);
+  }
+
+  async function loadMacros() {
+    if (!S.on) { $("#macroState").textContent = "未连接"; return; }
+    $("#macroState").textContent = "读取中…";
+    try {
+      const bytes = await readMacroBuffer();
+      localStorage.setItem("imk60.macroBackup", Array.from(bytes).join(","));
+      const list = splitMacros(bytes);
+      S.macros = list.map(decodeMacro);
+      renderMacros();
+      $("#macroState").textContent = "已读取（原始数据已备份到浏览器本地）";
+      $("#macroState").className = "macroState";
+    } catch (e) {
+      $("#macroState").textContent = "读取失败：" + e.message;
+      $("#macroState").className = "macroState warn";
+    }
+  }
+
+  function renderMacros() {
+    const box = $("#macroList");
+    box.innerHTML = "";
+    for (let i = 0; i < MACRO_COUNT; i++) {
+      const row = document.createElement("div");
+      row.className = "macroRow";
+      const idx = document.createElement("div");
+      idx.className = "macroIdx";
+      idx.textContent = "M" + i;
+      const inp = document.createElement("input");
+      inp.value = S.macros[i] || "";
+      inp.placeholder = "（空）";
+      inp.oninput = () => { S.macros[i] = inp.value; };
+      row.appendChild(idx); row.appendChild(inp);
+      box.appendChild(row);
+    }
+  }
+
+  async function saveMacros() {
+    if (!S.on) return toast("还没连接键盘", "err");
+    const bytes = new Uint8Array(MACRO_SIZE);
+    let off = 0;
+    for (let i = 0; i < MACRO_COUNT; i++) {
+      const enc = encodeMacro(S.macros[i] || "");
+      if (off + enc.length + 1 > MACRO_SIZE - 1) {
+        return toast("宏总长度超出缓冲区（" + MACRO_SIZE + " 字节）", "err");
+      }
+      bytes.set(enc, off);
+      off += enc.length;
+      bytes[off++] = 0;              // 宏结束
+    }
+    bytes[MACRO_SIZE - 1] = 0;       // 固件要求末字节为 0
+
+    $("#macroState").textContent = "写入中…";
+    try {
+      for (let o = 0; o < MACRO_SIZE; o += 28) {
+        const n = Math.min(28, MACRO_SIZE - o);
+        const chunk = Array.from(bytes.slice(o, o + n));
+        await xfer([0x0f, (o >> 8) & 0xff, o & 0xff, n, ...chunk], 1200);
+      }
+      $("#macroState").textContent = "已保存（" + off + " / " + MACRO_SIZE + " 字节）";
+      $("#macroState").className = "macroState";
+      toast("宏已保存到键盘", "ok");
+    } catch (e) {
+      $("#macroState").textContent = "写入失败：" + e.message;
+      $("#macroState").className = "macroState warn";
+      toast("写入失败：" + e.message, "err");
+    }
+  }
+
+  async function resetMacros() {
+    if (!S.on) return toast("还没连接键盘", "err");
+    if (!confirm("清空键盘里的全部宏？（当前内容会先备份到浏览器）")) return;
+    try {
+      const bytes = await readMacroBuffer();
+      localStorage.setItem("imk60.macroBackup", Array.from(bytes).join(","));
+      await xfer([0x10], 800);
+      S.macros = new Array(MACRO_COUNT).fill("");
+      renderMacros();
+      $("#macroState").textContent = "已清空";
+      toast("已清空全部宏", "ok");
+    } catch (e) {
+      toast("清空失败：" + e.message, "err");
+    }
+  }
+
+  /* 生成"打开驱动网页"的宏：Win+R → 网址 → 回车 */
+  function genOpenDriverMacro() {
+    const url = "fatallove101.github.io/imk60";
+    const seq = "{DOWN:E3}{TAP:15}{UP:E3}{DELAY:400}" + url + "{DELAY:200}{TAP:28}";
+    const free = S.macros.findIndex((m) => !m);
+    const i = free >= 0 ? free : 0;
+    S.macros[i] = seq;
+    renderMacros();
+    toast("已写入 M" + i + "，记得点「保存到键盘」", "ok");
+    $("#macroState").textContent = "M" + i + " 已生成，点「保存到键盘」生效";
+  }
+
   /* ================= 视图 ================= */
-  const VIEWS = { keymap: "viewKeymap", advanced: "viewAdvanced", light: "viewLight", buzzer: "viewBuzzer", test: "viewTest", backup: "viewBackup" };
+  const VIEWS = { keymap: "viewKeymap", advanced: "viewAdvanced", light: "viewLight", macro: "viewMacro", buzzer: "viewBuzzer", test: "viewTest", backup: "viewBackup" };
   function setView(v) {
     S.view = v;
     $$(".nav").forEach((b) => b.classList.toggle("active", b.dataset.view === v));
@@ -1845,6 +2036,7 @@
     if (v === "keymap") { renderSelChip(); renderPicker(); }
     if (v === "advanced") { enterAdvanced(); }
     if (v === "buzzer") { readBuzzer(); renderBuzzCodes(); }
+    if (v === "macro") { renderMacros(); if (S.on) loadMacros(); }
     if (v === "backup") { updateBackendHint(); }
     if (v === "light") {
       renderLight();
@@ -1956,6 +2148,10 @@
     $("#btnHome").onclick = backHome;
     $("#btnGoKeymap").onclick = () => setView("keymap");
     $("#btnSaveLight").onclick = () => saveLighting(false);
+    $("#btnMacroRead").onclick = () => loadMacros();
+    $("#btnMacroSave").onclick = () => saveMacros();
+    $("#btnMacroGen").onclick = () => genOpenDriverMacro();
+    $("#btnMacroClear").onclick = () => resetMacros();
     $("#swAudio").onchange = (e) => setBuzzer(1, e.target.checked);
     $("#swClicky").onchange = (e) => setBuzzer(2, e.target.checked);
     $("#homeDiag2").onclick = () => { $("#diagBar").hidden = false; S.diag = true; };

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>imk60 宏区只读探测</title>
+<style>
+  body{margin:0;background:#f6f7f9;font:14px/1.6 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;color:#1b1d21}
+  .wrap{max-width:900px;margin:0 auto;padding:32px 20px 60px}
+  h1{font-size:20px;margin:0 0 6px}
+  .sub{color:#6b7280;font-size:13px;margin-bottom:20px}
+  .card{background:#fff;border:1px solid #e6e8ec;border-radius:14px;padding:20px;margin-bottom:16px}
+  button{border:1px solid #e6e8ec;background:#fff;padding:9px 16px;border-radius:9px;font:inherit;cursor:pointer}
+  button.primary{background:#2563eb;border-color:#2563eb;color:#fff;font-weight:600}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  #log{background:#0f1216;color:#c8d1dc;font:12px/1.7 ui-monospace,Consolas,monospace;border-radius:10px;padding:12px;height:160px;overflow:auto;white-space:pre-wrap;margin-top:14px}
+  textarea{width:100%;height:220px;font:11.5px/1.6 ui-monospace,Consolas,monospace;border:1px solid #e6e8ec;border-radius:10px;padding:10px;margin-top:12px;box-sizing:border-box}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .tag{display:inline-block;background:#eef2ff;color:#3452c4;border-radius:999px;padding:2px 10px;font-size:12px;margin-right:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>imk60 宏区只读探测</h1>
+  <div class="sub">只发送「读」命令：<span class="tag">0x0C 宏数量</span><span class="tag">0x0D 缓冲区大小</span><span class="tag">0x0E 读取缓冲区</span>。不会写入任何东西。</div>
+
+  <div class="card">
+    <div class="row">
+      <button class="primary" id="btnConn">① 连接键盘</button>
+      <button id="btnRun" disabled>② 开始探测（只读）</button>
+      <button id="btnCopy" disabled>复制结果</button>
+    </div>
+    <div id="log"></div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <b>结果（把这个文本框的内容整段发我）</b>
+    </div>
+    <textarea id="out" spellcheck="false" placeholder="探测完成后这里会出现十六进制数据…"></textarea>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const logEl = $("#log");
+function log(msg) {
+  const d = document.createElement("div");
+  d.textContent = msg;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+const hex = (a) => Array.from(a).map((b) => b.toString(16).padStart(2, "0")).join(" ");
+
+let dev = null;
+let chain = Promise.resolve();
+
+function xfer(bytes, timeout = 900) {
+  const run = chain.then(() => doXfer(bytes, timeout));
+  chain = run.catch(() => {});
+  return run;
+}
+async function doXfer(bytes, timeout) {
+  const buf = new Uint8Array(32);
+  buf.set(bytes.slice(0, 32));
+  const wait = new Promise((resolve, reject) => {
+    const on = (e) => { done(); resolve(new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength)); };
+    const t = setTimeout(() => { done(); reject(new Error("超时")); }, timeout);
+    function done() { clearTimeout(t); dev.removeEventListener("inputreport", on); }
+    dev.addEventListener("inputreport", on);
+  });
+  wait.catch(() => {});
+  await dev.sendReport(0, buf);
+  const r = await wait;
+  await new Promise((res) => setTimeout(res, 6));
+  return r;
+}
+
+$("#btnConn").onclick = async () => {
+  try {
+    const picked = await navigator.hid.requestDevice({ filters: [{ usagePage: 0xff60, usage: 0x61 }] });
+    if (!picked.length) return;
+    dev = picked[0];
+    await dev.open();
+    log("已连接: " + dev.productName);
+    $("#btnRun").disabled = false;
+  } catch (e) { log("连接失败: " + e.message); }
+};
+
+$("#btnRun").onclick = async () => {
+  $("#btnRun").disabled = true;
+  const out = [];
+  out.push("== imk60 宏区探测 ==");
+  out.push("产品名: " + (dev && dev.productName));
+  out.push("VID:PID = " + dev.vendorId.toString(16) + ":" + dev.productId.toString(16));
+
+  // 0x0C 宏数量
+  try {
+    const r = await xfer([0x0c]);
+    out.push("0x0C 宏数量 raw = " + hex(r.slice(0, 8)));
+    log("0x0C = " + hex(r.slice(0, 8)));
+  } catch (e) { out.push("0x0C 超时"); log("0x0C 超时"); }
+
+  // 0x0D 缓冲区大小
+  let size = 0;
+  try {
+    const r = await xfer([0x0d]);
+    out.push("0x0D 缓冲区大小 raw = " + hex(r.slice(0, 8)));
+    size = (r[1] << 8) | r[2];
+    if (!size || size > 8192) size = (r[1] | (r[2] << 8));
+    out.push("  -> 解析 size = " + size);
+    log("0x0D = " + hex(r.slice(0, 8)) + "  size=" + size);
+  } catch (e) { out.push("0x0D 超时"); log("0x0D 超时"); }
+
+  if (!size || size > 8192) size = 3307;
+
+  // 0x0E 读缓冲区
+  const chunks = [];
+  for (let off = 0; off < size; off += 28) {
+    const n = Math.min(28, size - off);
+    try {
+      const r = await xfer([0x0e, (off >> 8) & 0xff, off & 0xff, n], 1200);
+      const data = r.slice(4, 4 + n);
+      chunks.push(data);
+      if (off % 280 === 0) log("读取 " + off + "/" + size);
+    } catch (e) {
+      log("off=" + off + " 超时");
+      chunks.push(new Uint8Array(n));
+    }
+  }
+  out.push("");
+  out.push("== 缓冲区 hex（共 " + size + " 字节）==");
+  chunks.forEach((c, i) => {
+    const off = i * 28;
+    out.push(off.toString().padStart(5, "0") + "  " + hex(c));
+  });
+  const nonZero = chunks.reduce((n, c) => n + Array.from(c).filter((b) => b !== 0).length, 0);
+  out.push("");
+  out.push("非零字节数: " + nonZero);
+
+  $("#out").value = out.join("\n");
+  $("#btnCopy").disabled = false;
+  $("#btnRun").disabled = false;
+  log("探测完成");
+};
+
+$("#btnCopy").onclick = async () => {
+  try {
+    await navigator.clipboard.writeText($("#out").value);
+    log("已复制到剪贴板");
+  } catch (e) {
+    $("#out").select();
+    document.execCommand("copy");
+    log("已复制（回退方式）");
+  }
+};
+
+log("就绪，请点「① 连接键盘」");
+</script>
+</body>
+</html>

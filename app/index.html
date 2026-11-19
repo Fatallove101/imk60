@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>imk60 · 女战士驱动</title>
-<link rel="stylesheet" href="app.css?v=231119">
+<link rel="stylesheet" href="app.css?v=231120">
 <link rel="icon" type="image/webp" href="icon.webp">
 <link rel="apple-touch-icon" href="icon.webp">
 </head>
@@ -75,6 +75,10 @@
       <button class="nav" data-view="light">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>
         <span>灯光设置</span>
+      </button>
+      <button class="nav" data-view="macro">
+        <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="3"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>
+        <span>宏</span>
       </button>
       <button class="nav" data-view="buzzer">
         <svg viewBox="0 0 24 24"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path d="M17 9a4 4 0 010 6M20 6.5a8 8 0 010 11"/></svg>
@@ -167,6 +171,26 @@
         </div>
       </div>
 
+      <!-- 宏 -->
+      <div class="view" id="viewMacro" hidden>
+        <div class="macroHead">
+          <div>
+            <div class="ltitle">宏（Macro）</div>
+            <div class="muted">最多 16 条 · 共 3307 字节。支持纯文本 + <code>{DELAY:300}</code> <code>{TAP:28}</code> <code>{DOWN:E3}</code> <code>{UP:E3}</code> 转义（键码为十六进制 HID 用法号）。</div>
+          </div>
+        </div>
+
+        <div class="macroBar">
+          <button class="softbtn" id="btnMacroRead">从键盘读取</button>
+          <button class="softbtn" id="btnMacroSave">保存到键盘</button>
+          <button class="softbtn" id="btnMacroGen">生成「打开驱动网页」</button>
+          <button class="softbtn danger" id="btnMacroClear">清空全部宏</button>
+        </div>
+
+        <div class="macroList" id="macroList"></div>
+        <div class="macroState" id="macroState">未连接</div>
+      </div>
+
       <!-- 蜂鸣器 -->
       <div class="view" id="viewBuzzer" hidden>
         <div class="buzzHead">
@@ -255,7 +279,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="keycodes.js?v=231119"></script>
-<script src="app.js?v=231119"></script>
+<script src="keycodes.js?v=231120"></script>
+<script src="app.js?v=231120"></script>
 </body>
 </html>
