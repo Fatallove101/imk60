@@ -563,3 +563,9 @@ code{font-family:var(--mono);font-size:12px;background:#f1f4fa;padding:1px 6px;b
   font:12.5px var(--mono);padding:0 12px;outline:none;
 }
 .macroInput:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(47,107,255,.10)}
+
+.macroWarn{
+  padding:10px 14px;border-radius:12px;background:#fff7e8;color:#8a5f18;
+  font-size:12.5px;line-height:1.7;margin-bottom:12px;max-width:920px;
+}
+.macroWarn b{color:#7a4f0d}
