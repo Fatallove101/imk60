@@ -1894,6 +1894,113 @@
     return out;
   }
 
+  /* ---- Vial 解锁（写宏前必须） ---- */
+  async function readUnlockStatus() {
+    const r = await xfer([0xfe, 0x05], 800);
+    const pairs = [];
+    for (let i = 2; i + 1 < 32; i += 2) {
+      if (r[i] === 0xff) break;
+      pairs.push([r[i], r[i + 1]]);
+    }
+    return { unlocked: !!r[0], inProgress: !!r[1], pairs };
+  }
+
+  function keysForPairs(pairs) {
+    const names = [];
+    pairs.forEach(([r, c]) => {
+      const k = S.keys.find((x) => x.r === r && x.c === c);
+      names.push(k ? (kcOf(kcAt(r, c, 0)).t || (r + "," + c)) : (r + "," + c));
+    });
+    return names;
+  }
+
+  function setLockUI(st) {
+    const el = $("#lockState");
+    if (!el) return;
+    if (st.unlocked) {
+      el.textContent = "🔓 已解锁（可以写入宏）";
+      el.className = "ulockState on";
+      $("#btnUnlock").hidden = true;
+      $("#btnLock").hidden = false;
+    } else {
+      el.textContent = "🔒 已锁定（写宏前需解锁）";
+      el.className = "ulockState off";
+      $("#btnUnlock").hidden = false;
+      $("#btnLock").hidden = true;
+    }
+  }
+
+  async function refreshLock() {
+    if (!S.on) { $("#lockState").textContent = "未连接"; return; }
+    try {
+      const st = await readUnlockStatus();
+      setLockUI(st);
+      const names = keysForPairs(st.pairs);
+      $("#unlockHint").innerHTML = st.unlocked
+        ? "解锁状态下才能写入宏。拔掉键盘或点「重新上锁」会恢复锁定。"
+        : "点「解锁键盘」，然后<b>按住</b>键盘上的 " + (names.map((n) => "<b>" + n + "</b>").join(" + ") || "指定按键") + " 不放，直到进度条走完（约 5 秒）。";
+    } catch (e) {
+      $("#lockState").textContent = "解锁状态读取失败：" + e.message;
+    }
+  }
+
+  async function unlockKeyboard() {
+    if (!S.on) return toast("还没连接键盘", "err");
+    try {
+      const st0 = await readUnlockStatus();
+      if (st0.unlocked) { setLockUI(st0); return toast("已经是解锁状态", "ok"); }
+
+      const names = keysForPairs(st0.pairs);
+      $("#unlockHint").innerHTML = "请<b>按住</b> " + (names.map((n) => "<b>" + n + "</b>").join(" + ") || "指定按键") + " 不放，进度条走完即解锁。";
+      const track = document.querySelector(".ubarTrack");
+      if (track) track.classList.add("show");
+      $("#ubarFill").style.width = "0%";
+
+      await xfer([0xfe, 0x06], 800);        // unlock_start
+      let ok = false;
+      let miss = 0;
+      for (let i = 0; i < 200; i++) {
+        await new Promise((r) => setTimeout(r, 60));
+        let r;
+        try { r = await xfer([0xfe, 0x07], 600); } catch (e) { break; }
+        const unlocked = !!r[0], inProg = !!r[1], counter = r[2];
+        const pct = Math.max(0, Math.min(100, Math.round((1 - counter / 50) * 100)));
+        $("#ubarFill").style.width = pct + "%";
+        if (unlocked) { ok = true; break; }
+        if (!inProg) {
+          // 还没按住 → 自动重新发起，给用户时间（最多容忍 3 次）
+          miss += 1;
+          if (miss >= 3) {
+            miss = 0;
+            try { await xfer([0xfe, 0x06], 600); } catch (e) { }
+          }
+        } else {
+          miss = 0;
+        }
+      }
+      if (ok) {
+        setLockUI({ unlocked: true });
+        $("#ubarFill").style.width = "100%";
+        toast("已解锁，可以保存宏了", "ok");
+        setTimeout(() => { if (track) track.classList.remove("show"); }, 800);
+      } else {
+        toast("解锁未完成：请按住提示的按键不要松手", "err");
+        $("#unlockHint").innerHTML = "解锁中断了（没按住或中途松手）。再点一次「解锁键盘」重试。";
+        if (track) track.classList.remove("show");
+      }
+    } catch (e) {
+      toast("解锁失败：" + e.message, "err");
+    }
+  }
+
+  async function lockKeyboard() {
+    try {
+      await xfer([0xfe, 0x08], 600);
+      await refreshLock();
+      toast("已重新上锁", "ok");
+    } catch (e) { toast("上锁失败：" + e.message, "err"); }
+  }
+
   async function readMacroBuffer() {
     try {
       const sz = await xfer([0x0d], 700);
@@ -1990,6 +2097,14 @@
 
   async function saveMacros() {
     if (!S.on) return toast("还没连接键盘", "err");
+    try {
+      const st = await readUnlockStatus();
+      if (!st.unlocked) {
+        toast("键盘是锁定状态，请先点「解锁键盘」并按住提示的键", "err");
+        $("#unlockHint").innerHTML = "写宏前必须先解锁：点上面的<b>「解锁键盘」</b>，然后按住提示的按键约 5 秒。";
+        return;
+      }
+    } catch (e) { /* 读不到就照常尝试 */ }
     const bytes = new Uint8Array(MACRO_SIZE);
     let off = 0;
     for (let i = 0; i < MACRO_COUNT; i++) {
@@ -2051,7 +2166,7 @@
   /* 生成"打开驱动网页"的宏：Win+R → 网址 → 回车 */
   function genOpenDriverMacro() {
     const url = "fatallove101.github.io/imk60";
-    const seq = "{DOWN:E3}{TAP:15}{UP:E3}{DELAY:400}" + url + "{DELAY:200}{TAP:28}";
+    const seq = "{DOWN:E3}{TAP:15}{UP:E3}{DELAY:1500}" + url + "{DELAY:400}{TAP:28}";
     const free = S.macros.findIndex((m) => !m);
     const i = free >= 0 ? free : 0;
     S.macros[i] = seq;
@@ -2080,7 +2195,7 @@
     if (v === "keymap") { renderSelChip(); renderPicker(); }
     if (v === "advanced") { enterAdvanced(); }
     if (v === "buzzer") { readBuzzer(); renderBuzzCodes(); }
-    if (v === "macro") { renderMacros(); if (S.on) loadMacros(); }
+    if (v === "macro") { renderMacros(); if (S.on) { loadMacros(); refreshLock(); } }
     if (v === "backup") { updateBackendHint(); }
     if (v === "light") {
       renderLight();
@@ -2192,6 +2307,8 @@
     $("#btnHome").onclick = backHome;
     $("#btnGoKeymap").onclick = () => setView("keymap");
     $("#btnSaveLight").onclick = () => saveLighting(false);
+    $("#btnUnlock").onclick = () => unlockKeyboard();
+    $("#btnLock").onclick = () => lockKeyboard();
     $("#btnMacroRead").onclick = () => loadMacros();
     $("#btnMacroSave").onclick = () => saveMacros();
     $("#btnMacroGen").onclick = () => genOpenDriverMacro();

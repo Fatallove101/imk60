@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>imk60 · 女战士驱动</title>
-<link rel="stylesheet" href="app.css?v=231122">
+<link rel="stylesheet" href="app.css?v=231124">
 <link rel="icon" type="image/webp" href="icon.webp">
 <link rel="apple-touch-icon" href="icon.webp">
 </head>
@@ -180,7 +180,16 @@
           </div>
         </div>
 
-        <div class="macroWarn">⚠ 实测结论：本固件<b>拒绝写入</b>宏区（写完回读不一致），因此「保存到键盘」当前无效，本页仅可查看。功能暂停，等固件更新或换方案。</div>
+        <div class="unlockBar" id="unlockBar">
+          <div class="ubarRow">
+            <span class="ulockState" id="lockState">锁状态：读取中…</span>
+            <button class="softbtn" id="btnUnlock">解锁键盘</button>
+            <button class="softbtn" id="btnLock" hidden>重新上锁</button>
+          </div>
+          <div class="ubarTrack"><div class="ubarFill" id="ubarFill"></div></div>
+          <div class="ulockHint" id="unlockHint">写宏前需要先解锁键盘（Vial 的安全机制）。</div>
+        </div>
+
         <div class="macroBar">
           <button class="softbtn" id="btnMacroRead">从键盘读取</button>
           <button class="softbtn" id="btnMacroSave">保存到键盘</button>
@@ -280,7 +289,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="keycodes.js?v=231122"></script>
-<script src="app.js?v=231122"></script>
+<script src="keycodes.js?v=231124"></script>
+<script src="app.js?v=231124"></script>
 </body>
 </html>
