@@ -1942,17 +1942,49 @@
     const box = $("#macroList");
     box.innerHTML = "";
     for (let i = 0; i < MACRO_COUNT; i++) {
-      const row = document.createElement("div");
-      row.className = "macroRow";
-      const idx = document.createElement("div");
-      idx.className = "macroIdx";
-      idx.textContent = "M" + i;
+      const text = S.macros[i] || "";
+      const bytes = encodeMacro(text).length;
+
+      const card = document.createElement("div");
+      card.className = "entCard macroCard" + (text ? "" : " off");
+
+      const head = document.createElement("div");
+      head.className = "entHead";
+      const name = document.createElement("span");
+      name.className = "entName";
+      name.textContent = "宏 M" + i;
+      head.appendChild(name);
+
+      const cnt = document.createElement("span");
+      cnt.className = "macroBytes";
+      cnt.textContent = text ? bytes + " 字节" : "空";
+      head.appendChild(cnt);
+
+      const clear = document.createElement("button");
+      clear.className = "ghostbtn small";
+      clear.textContent = "清空";
+      clear.onclick = () => {
+        S.macros[i] = "";
+        renderMacros();
+      };
+      head.appendChild(clear);
+      card.appendChild(head);
+
+      const line = document.createElement("div");
+      line.className = "entLine";
       const inp = document.createElement("input");
-      inp.value = S.macros[i] || "";
-      inp.placeholder = "（空）";
-      inp.oninput = () => { S.macros[i] = inp.value; };
-      row.appendChild(idx); row.appendChild(inp);
-      box.appendChild(row);
+      inp.className = "macroInput";
+      inp.value = text;
+      inp.placeholder = "（空）可直接输入文本，或用 {DELAY:300} {TAP:28} {DOWN:E3} {UP:E3}";
+      inp.oninput = () => {
+        S.macros[i] = inp.value;
+        cnt.textContent = inp.value ? encodeMacro(inp.value).length + " 字节" : "空";
+        card.classList.toggle("off", !inp.value);
+      };
+      line.appendChild(inp);
+      card.appendChild(line);
+
+      box.appendChild(card);
     }
   }
 
@@ -1978,9 +2010,21 @@
         const chunk = Array.from(bytes.slice(o, o + n));
         await xfer([0x0f, (o >> 8) & 0xff, o & 0xff, n, ...chunk], 1200);
       }
-      $("#macroState").textContent = "已保存（" + off + " / " + MACRO_SIZE + " 字节）";
-      $("#macroState").className = "macroState";
-      toast("宏已保存到键盘", "ok");
+      $("#macroState").textContent = "已写入，正在回读校验…";
+      const back = await readMacroBuffer();
+      let same = true;
+      for (let i = 0; i < MACRO_SIZE; i++) {
+        if (back[i] !== bytes[i]) { same = false; break; }
+      }
+      if (same) {
+        $("#macroState").textContent = "✅ 已保存并校验一致（" + off + " / " + MACRO_SIZE + " 字节）";
+        $("#macroState").className = "macroState";
+        toast("宏已保存，回读一致", "ok");
+      } else {
+        $("#macroState").textContent = "⚠ 写入后回读不一致 —— 固件可能没接受写入";
+        $("#macroState").className = "macroState warn";
+        toast("回读不一致", "err");
+      }
     } catch (e) {
       $("#macroState").textContent = "写入失败：" + e.message;
       $("#macroState").className = "macroState warn";
@@ -2012,8 +2056,8 @@
     const i = free >= 0 ? free : 0;
     S.macros[i] = seq;
     renderMacros();
-    toast("已写入 M" + i + "，记得点「保存到键盘」", "ok");
-    $("#macroState").textContent = "M" + i + " 已生成，点「保存到键盘」生效";
+    toast("已生成到 M" + i + "，点「保存到键盘」", "ok");
+    $("#macroState").textContent = "M" + i + " 已生成（Win+R → 网址 → 回车），点「保存到键盘」后，去改键页把键绑成 M" + i;
   }
 
   /* ================= 视图 ================= */
