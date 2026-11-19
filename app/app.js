@@ -275,17 +275,46 @@
   }
 
   /* ================= 键码面板 ================= */
-  const CATS = ["基础", "修饰", "层", "高级", "功能", "多媒体", "符号", "鼠标", "蜂鸣器", "自定义"];
+  const CATS = ["基础", "修饰", "层", "高级", "功能", "多媒体", "符号", "鼠标", "小键盘", "蜂鸣器", "自定义"];
   let curCat = "基础";
 
-  const ROWS = [
-    [[0x29,1],[0x3a,1],[0x3b,1],[0x3c,1],[0x3d,1],[0x3e,1],[0x3f,1],[0x40,1],[0x41,1],[0x42,1],[0x43,1],[0x44,1],[0x45,1],[0x46,1],[0x47,1],[0x48,1]],
-    [[0x35,1],[0x1e,1],[0x1f,1],[0x20,1],[0x21,1],[0x22,1],[0x23,1],[0x24,1],[0x25,1],[0x26,1],[0x27,1],[0x2d,1],[0x2e,1],[0x2a,2]],
-    [[0x2b,1.5],[0x14,1],[0x1a,1],[0x08,1],[0x15,1],[0x17,1],[0x1c,1],[0x18,1],[0x0c,1],[0x12,1],[0x13,1],[0x2f,1],[0x30,1],[0x31,1.5]],
-    [[0x39,1.75],[0x04,1],[0x16,1],[0x07,1],[0x09,1],[0x0a,1],[0x0b,1],[0x0d,1],[0x0e,1],[0x0f,1],[0x33,1],[0x34,1],[0x28,2.25]],
-    [[0xe1,2.25],[0x1d,1],[0x1b,1],[0x06,1],[0x19,1],[0x05,1],[0x11,1],[0x10,1],[0x36,1],[0x37,1],[0x38,1],[0xe5,2.75]],
-    [[0xe0,1.25],[0xe3,1.25],[0xe2,1.25],[0x2c,6.25],[0xe6,1.25],[0xe7,1.25],[0x65,1.25],[0xe4,1.25]],
-  ];
+  /* 完整 104 键布局：[键码, x, y, w, h]（单位 1u） */
+  const FULL_KEYS = (() => {
+    const K = [];
+    const k = (c, x, y, w, h) => K.push([c, x, y, w || 1, h || 1]);
+    // ---- 主键区 ----
+    k(0x29, 0, 0);                                     // Esc
+    const f = [0x3a,0x3b,0x3c,0x3d,0x3e,0x3f,0x40,0x41,0x42,0x43,0x44,0x45];
+    [2,3,4,5,6.5,7.5,8.5,9.5,11,12,13,14].forEach((x, i) => k(f[i], x, 0));
+    k(0x35,0,1); k(0x1e,1,1); k(0x1f,2,1); k(0x20,3,1); k(0x21,4,1); k(0x22,5,1);
+    k(0x23,6,1); k(0x24,7,1); k(0x25,8,1); k(0x26,9,1); k(0x27,10,1);
+    k(0x2d,11,1); k(0x2e,12,1); k(0x2a,13,1,2);        // Bksp
+    k(0x2b,0,2,1.5);
+    [0x14,0x1a,0x08,0x15,0x17,0x1c,0x18,0x0c,0x12,0x13].forEach((c, i) => k(c, 1.5 + i, 2));
+    k(0x2f,11.5,2); k(0x30,12.5,2); k(0x31,13.5,2,1.5);
+    k(0x39,0,3,1.75);
+    [0x04,0x16,0x07,0x09,0x0a,0x0b,0x0d,0x0e,0x0f].forEach((c, i) => k(c, 1.75 + i, 3));
+    k(0x33,10.75,3); k(0x34,11.75,3); k(0x28,12.75,3,2.25);
+    k(0xe1,0,4,2.25);
+    [0x1d,0x1b,0x06,0x19,0x05,0x11,0x10].forEach((c, i) => k(c, 2.25 + i, 4));
+    k(0x36,9.25,4); k(0x37,10.25,4); k(0x38,11.25,4); k(0xe5,12.25,4,2.75);
+    k(0xe0,0,5,1.25); k(0xe3,1.25,5,1.25); k(0xe2,2.5,5,1.25); k(0x2c,3.75,5,6.25);
+    k(0xe6,10,5,1.25); k(0xe7,11.25,5,1.25); k(0x65,12.5,5,1.25); k(0xe4,13.75,5,1.25);
+    // ---- 功能区 ----
+    k(0x46,15.5,0); k(0x47,16.5,0); k(0x48,17.5,0);    // PrtSc ScrLk Pause
+    k(0x49,15.5,1); k(0x4a,16.5,1); k(0x4b,17.5,1);    // Ins Home PgUp
+    k(0x4c,15.5,2); k(0x4d,16.5,2); k(0x4e,17.5,2);    // Del End PgDn
+    k(0x52,16.5,4);                                     // ↑
+    k(0x50,15.5,5); k(0x51,16.5,5); k(0x4f,17.5,5);    // ← ↓ →
+    // ---- 小键盘 ----
+    k(0x53,19.25,0); k(0x54,20.25,0); k(0x55,21.25,0); k(0x56,22.25,0);
+    k(0x5f,19.25,1); k(0x60,20.25,1); k(0x61,21.25,1); k(0x57,22.25,1,1,2);
+    k(0x5c,19.25,2); k(0x5d,20.25,2); k(0x5e,21.25,2);
+    k(0x59,19.25,3); k(0x5a,20.25,3); k(0x5b,21.25,3); k(0x58,22.25,3,1,2);
+    k(0x62,19.25,4,2); k(0x63,21.25,4);
+    return K;
+  })();
+  const FULL_W = 23.25, FULL_H = 6;
 
   function renderTabs() {
     const box = $("#tabs");
@@ -314,17 +343,32 @@
     return d;
   }
 
+  function renderFullPicker(box) {
+    const avail = (box.clientWidth || 1040) - 8;
+    const U = Math.max(26, Math.min(44, Math.floor(avail / FULL_W)));
+    const wrap = document.createElement("div");
+    wrap.className = "pickerFull";
+    wrap.style.width = (FULL_W * U) + "px";
+    wrap.style.height = (FULL_H * U) + "px";
+
+    FULL_KEYS.forEach(([code, x, y, w, h]) => {
+      const el = makeKeyEl(code, null);
+      el.classList.add("fpk");
+      el.style.left = (x * U + 2) + "px";
+      el.style.top = (y * U + 2) + "px";
+      el.style.width = (w * U - 4) + "px";
+      el.style.height = (h * U - 4) + "px";
+      wrap.appendChild(el);
+    });
+    box.appendChild(wrap);
+  }
+
   function renderPicker() {
     const box = $("#picker");
     box.innerHTML = "";
 
     if (curCat === "基础") {
-      ROWS.forEach((row) => {
-        const r = document.createElement("div");
-        r.className = "prow";
-        row.forEach(([code, span]) => r.appendChild(makeKeyEl(code, span)));
-        box.appendChild(r);
-      });
+      renderFullPicker(box);
       return;
     }
 
